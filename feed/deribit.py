@@ -16,7 +16,7 @@ Four jobs run side by side (asyncio tasks):
 Channels (rates measured 8 Oct 2026, ~950 BTC options):
 - ``book.{inst}.none.1.100ms``    top of book, sent only when it changes   ~340 rows/s
 - ``trades.option.BTC.100ms``     every option trade                       ~0.1 rows/s
-- ``deribit_price_index.btc_usd`` spot index                               ~1 row/s
+- ``deribit_price_index.btc_usd`` spot index (table "spot")              ~1 row/s
 We deliberately do NOT use ``ticker.{inst}.100ms``: it re-sends every
 instrument whenever the index moves (~1,000 msgs/s, ~770 KB/s) because
 Deribit's marks and Greeks change, even when no quote has changed.
@@ -112,8 +112,8 @@ class DeribitFeed:
                     self.ws = ws
                     await self._on_connect(ws)
                     if lost_at is not None:            # we are back: record the outage
-                        self.emit("gap", [{"start": lost_at, "end": now_ns(),
-                                           "asset": self.currency, "reason": reason}])
+                        self.emit("gap", [{"sym": self.currency, "asset": self.currency,
+                                           "start": lost_at, "end": now_ns(), "reason": reason}])
                     backoff = 1.0
                     await self._read_loop(ws)
             except asyncio.CancelledError:
@@ -159,7 +159,7 @@ class DeribitFeed:
                     self.emit("trade", [t])
                     self.emit("dq", self.quality.on_trade(t))
             elif kind == "deribit_price_index":
-                self.emit("index", [N.index_to_row(data, recv)])
+                self.emit("spot", [N.index_to_row(data, recv)])
         elif method == "heartbeat":
             if msg["params"].get("type") == "test_request":
                 await self._send(ws, "public/test", {})   # "yes, I'm still here"

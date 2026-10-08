@@ -4,8 +4,8 @@ Every function here is *pure*: message in, rows out, no network and no clocks
 except the ``recv`` time passed in. That makes them easy to unit-test against
 real recorded messages (tests/fixtures/deribit_samples.json).
 
-Rows are plain dicts keyed by column name. Missing values are ``None``, which
-becomes a q null later.
+Rows are plain dicts whose keys are exactly the feed columns of the table, in
+schema order. Missing values are ``None``, which becomes a q null.
 """
 from __future__ import annotations
 
@@ -20,8 +20,7 @@ def asset_of(sym: str) -> str:
 def _top(levels: list) -> tuple[float | None, float | None]:
     """First [price, size] level of a book side, or (None, None) if the side is empty."""
     if levels:
-        price, size = levels[0][0], levels[0][1]
-        return float(price), float(size)
+        return float(levels[0][0]), float(levels[0][1])
     return None, None
 
 
@@ -31,7 +30,7 @@ def book_to_quote(data: dict, recv: int) -> dict:
     ask, asize = _top(data.get("asks") or [])
     sym = data["instrument_name"]
     return {
-        "time": data["timestamp"] * MS, "recv": recv, "sym": sym, "asset": asset_of(sym),
+        "sym": sym, "asset": asset_of(sym), "exch": data["timestamp"] * MS, "recv": recv,
         "bid": bid, "bsize": bsize, "ask": ask, "asize": asize,
     }
 
@@ -46,21 +45,21 @@ def trades_to_rows(data: list, recv: int) -> list[dict]:
     for t in data:
         sym = t["instrument_name"]
         rows.append({
-            "time": t["timestamp"] * MS, "recv": recv, "sym": sym, "asset": asset_of(sym),
+            "sym": sym, "asset": asset_of(sym), "exch": t["timestamp"] * MS, "recv": recv,
             "price": float(t["price"]), "size": float(t["amount"]),
             "side": t["direction"],            # "buy"/"sell" = aggressor side
             "iv": t.get("iv"), "idx": t.get("index_price"),
-            "tradeid": str(t["trade_id"]),
+            "tradeid": int(t["trade_id"]),
         })
     return rows
 
 
 def index_to_row(data: dict, recv: int) -> dict:
-    """``deribit_price_index.{index}`` notification -> one ``index`` row."""
+    """``deribit_price_index.{index}`` notification -> one ``spot`` row."""
     name = data["index_name"]                   # e.g. "btc_usd"
     return {
-        "time": data["timestamp"] * MS, "recv": recv, "sym": name,
-        "asset": name.split("_")[0].upper(), "price": float(data["price"]),
+        "sym": name, "asset": name.split("_")[0].upper(),
+        "exch": data["timestamp"] * MS, "recv": recv, "price": float(data["price"]),
     }
 
 
@@ -70,7 +69,7 @@ def summary_to_rows(result: list, recv: int) -> list[dict]:
     for s in result:
         sym = s["instrument_name"]
         rows.append({
-            "time": s["creation_timestamp"] * MS, "recv": recv, "sym": sym, "asset": asset_of(sym),
+            "sym": sym, "asset": asset_of(sym), "exch": s["creation_timestamp"] * MS, "recv": recv,
             "mark": s.get("mark_price"), "markiv": s.get("mark_iv"),
             "und": s.get("underlying_price"), "idx": s.get("estimated_delivery_price"),
             "oi": s.get("open_interest"), "vol": s.get("volume"),
@@ -83,12 +82,11 @@ def instruments_to_ref(result: list) -> list[dict]:
     rows = []
     for i in result:
         sym = i["instrument_name"]
-        opt = i.get("option_type")
         rows.append({
             "sym": sym, "asset": asset_of(sym), "kind": i["kind"],
             "expiry": i["expiration_timestamp"] * MS,   # 08:00 UTC on expiry day
             "strike": i.get("strike"),
-            "cp": {"call": "C", "put": "P"}.get(opt),
+            "cp": {"call": "C", "put": "P"}.get(i.get("option_type")),
             "csize": i.get("contract_size"), "tick": i.get("tick_size"),
             "mintrade": i.get("min_trade_amount"),
             "listed": i["creation_timestamp"] * MS,

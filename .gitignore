@@ -20,3 +20,8 @@ Thumbs.db
 
 # Secrets
 .env
+
+# KX's kdb+tick scripts: downloaded by scripts/get_kdb_tick.sh, not redistributed
+q/tick.q
+q/tick/u.q
+q/tick/r.q

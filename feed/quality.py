@@ -11,6 +11,7 @@ from __future__ import annotations
 import statistics
 
 MS = 1_000_000
+MINUTE_NS = 60 * 1_000_000_000
 
 
 class QualityMonitor:
@@ -26,7 +27,7 @@ class QualityMonitor:
 
     def _roll(self, recv: int) -> list[dict]:
         """If a new minute has started, close the old one and return its dq row."""
-        minute = recv // (60 * 1_000_000_000)
+        minute = recv // MINUTE_NS
         out = []
         if self.minute is not None and minute != self.minute:
             out.append(self.row())
@@ -38,7 +39,7 @@ class QualityMonitor:
         out = self._roll(q["recv"])
         self.quotes += 1
         self.syms.add(q["sym"])
-        self.lat_ms.append((q["recv"] - q["time"]) / MS)
+        self.lat_ms.append((q["recv"] - q["exch"]) / MS)
         if q["bid"] is None or q["ask"] is None:
             self.onesided += 1
         elif q["bid"] >= q["ask"]:
@@ -53,7 +54,8 @@ class QualityMonitor:
     def row(self) -> dict:
         lat = self.lat_ms
         return {
-            "time": self.minute * 60 * 1_000_000_000, "asset": self.asset,
+            "sym": self.asset, "asset": self.asset,
+            "minute": (self.minute or 0) * MINUTE_NS,
             "quotes": self.quotes, "trades": self.trades,
             "crossed": self.crossed, "onesided": self.onesided,
             "symsupdated": len(self.syms),

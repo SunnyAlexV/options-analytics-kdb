@@ -33,7 +33,7 @@ These are the pieces that separate a demo from a system a desk would actually ru
 | **Latency stamps** | Each row carries a timestamp from every stage it passes through (feed received, tickerplant, calc) | End-to-end latency measured per stage (kept private under the KDB-X licence) | 2–5 |
 | **Health monitor** | Each process publishes a heartbeat; the dashboard shows which processes are up, plus their memory and queue sizes | Operational visibility | 6 |
 | **Alerts** | Arbitrage violations, IV jumps, feed gaps → alert table → dashboard banner | Turns analytics into something a trader would act on | 5–6 |
-| **One config file + launcher** | `config.yaml` (ports, paths, instruments); `start.sh` / `stop.sh` / `status.sh` | The whole system starts with one command. Good command-line practice. | 2 |
+| **One config file + launcher** | `config.env` (ports, paths); `start.sh` / `stop.sh` / `status.sh` | The whole system starts with one command. Good command-line practice. | 2 |
 | **Tests in all three languages** | pytest (Python), GoogleTest (C++), a small q test harness | Correctness provable in every layer | 2–3 |
 
 ## Decisions
@@ -46,6 +46,9 @@ These are the pieces that separate a demo from a system a desk would actually ru
 | Surface | Raw SVI per expiry, plus butterfly and calendar arbitrage checks | SSVI (arbitrage-free by construction) |
 | P&L explain | A fixed, realistic hypothetical book (e.g. short 25-delta strangle + long calendar spread) | — |
 | Quote source | `book.{inst}.none.1.100ms` (top of book, sent only on change, ~250–350 rows/s); Deribit marks/forwards via a REST snapshot every 10 s. **Not** `ticker.{inst}.100ms`: measured at ~1,000 msgs/s because it re-sends every option when the index moves. | Live forwards from futures, plus our own put-call-parity forwards |
+| Tick architecture | **KX's standard kdb+tick** (`tick.q`, `u.q`, `r.q`) used unmodified, pinned to commit `85c08ff` and downloaded by `scripts/get_kdb_tick.sh` (KX's repo has no licence file, so it isn't redistributed). Our code: generated schema, small RDB/HDB wrappers, gateway, scripts | — |
+| Table conventions | kdb+tick's: first columns `time` (stamped by the tickerplant) and `sym`; exchange and feed times kept as `exch`, `recv`. High-cardinality ids (trade ids) are longs, never symbols | — |
+| Day boundary | Midnight UTC; every q process runs with `TZ=UTC` | — |
 | Repo licence | MIT (the KDB-X licence forbids linking with copyleft code) | — |
 | Benchmarks | Publish C++ vs Python timings only; no published timings that involve q unless KX approves in writing | — |
 | CI | GitHub Actions runs the C++ and Python tests; q tests run locally | — |
