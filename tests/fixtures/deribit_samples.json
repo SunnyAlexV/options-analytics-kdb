@@ -1,0 +1,187 @@
+{
+ "book": {
+  "jsonrpc": "2.0",
+  "method": "subscription",
+  "params": {
+   "channel": "book.BTC-25DEC26-80000-C.none.1.100ms",
+   "data": {
+    "timestamp": 1791485247243,
+    "change_id": 177724671683,
+    "instrument_name": "BTC-25DEC26-80000-C",
+    "bids": [
+     [
+      0.0835,
+      7.5
+     ]
+    ],
+    "asks": [
+     [
+      0.085,
+      43.2
+     ]
+    ]
+   }
+  }
+ },
+ "trades": {
+  "jsonrpc": "2.0",
+  "method": "subscription",
+  "params": {
+   "channel": "trades.option.BTC.100ms",
+   "data": [
+    {
+     "timestamp": 1791485266387,
+     "iv": 34.87,
+     "price": 0.0235,
+     "amount": 0.1,
+     "direction": "buy",
+     "index_price": 81476.35,
+     "instrument_name": "BTC-23OCT26-81000-P",
+     "trade_seq": 41,
+     "mark_price": 0.02337899,
+     "tick_direction": 3,
+     "starbase_match_id": 234023986709671936,
+     "trade_id": "450692586",
+     "contracts": 0.1,
+     "starbase_timestamp": 1791485266387572851
+    }
+   ]
+  }
+ },
+ "index": {
+  "jsonrpc": "2.0",
+  "method": "subscription",
+  "params": {
+   "channel": "deribit_price_index.btc_usd",
+   "data": {
+    "timestamp": 1791485247242,
+    "price": 81446.14,
+    "index_name": "btc_usd"
+   }
+  }
+ },
+ "instruments": [
+  {
+   "state": "open",
+   "price_index": "btc_usd",
+   "kind": "option",
+   "instrument_name": "BTC-9OCT26-65000-C",
+   "maker_commission": 0.0003,
+   "taker_commission": 0.0003,
+   "instrument_type": "reversed",
+   "expiration_timestamp": 1791532800000,
+   "product_group": "BTC",
+   "underlying_type": "crypto",
+   "instrument_id": 696110,
+   "creation_timestamp": 1789632015000,
+   "is_active": true,
+   "contract_size": 1.0,
+   "tick_size": 0.0001,
+   "strike": 65000.0,
+   "counter_currency": "USD",
+   "option_type": "call",
+   "min_trade_amount": 0.1,
+   "block_trade_commission": 0.0003,
+   "block_trade_min_trade_amount": 25,
+   "block_trade_tick_size": 0.0001,
+   "settlement_currency": "BTC",
+   "settlement_period": "week",
+   "base_currency": "BTC",
+   "index_id": 1000033,
+   "quote_currency": "BTC",
+   "tick_size_steps": [
+    {
+     "tick_size": 0.0005,
+     "above_price": 0.005
+    }
+   ],
+   "lot_size": 1,
+   "base_currency_uuid": "5b71fc48-3dd3-540c-809b-f8c94d0e68b5",
+   "quote_currency_uuid": "5b71fc48-3dd3-540c-809b-f8c94d0e68b5"
+  },
+  {
+   "state": "open",
+   "price_index": "btc_usd",
+   "kind": "option",
+   "instrument_name": "BTC-9OCT26-65000-P",
+   "maker_commission": 0.0003,
+   "taker_commission": 0.0003,
+   "instrument_type": "reversed",
+   "expiration_timestamp": 1791532800000,
+   "product_group": "BTC",
+   "underlying_type": "crypto",
+   "instrument_id": 696111,
+   "creation_timestamp": 1789632015000,
+   "is_active": true,
+   "contract_size": 1.0,
+   "tick_size": 0.0001,
+   "strike": 65000.0,
+   "counter_currency": "USD",
+   "option_type": "put",
+   "min_trade_amount": 0.1,
+   "block_trade_commission": 0.0003,
+   "block_trade_min_trade_amount": 25,
+   "block_trade_tick_size": 0.0001,
+   "settlement_currency": "BTC",
+   "settlement_period": "week",
+   "base_currency": "BTC",
+   "index_id": 1000033,
+   "quote_currency": "BTC",
+   "tick_size_steps": [
+    {
+     "tick_size": 0.0005,
+     "above_price": 0.005
+    }
+   ],
+   "lot_size": 1,
+   "base_currency_uuid": "5b71fc48-3dd3-540c-809b-f8c94d0e68b5",
+   "quote_currency_uuid": "5b71fc48-3dd3-540c-809b-f8c94d0e68b5"
+  }
+ ],
+ "summary": [
+  {
+   "high": 0.0345,
+   "low": 0.028,
+   "last": 0.028,
+   "instrument_name": "BTC-27NOV26-88000-C",
+   "bid_price": 0.027,
+   "ask_price": 0.028,
+   "open_interest": 1342.5,
+   "mark_price": 0.0276527,
+   "interest_rate": 0.0,
+   "creation_timestamp": 1791485265453,
+   "estimated_delivery_price": 81476.35,
+   "price_change": -16.4179,
+   "volume": 19.4,
+   "mark_iv": 37.01,
+   "underlying_price": 82139.44,
+   "underlying_index": "BTC-27NOV26",
+   "base_currency": "BTC",
+   "quote_currency": "BTC",
+   "volume_usd": 50523.81,
+   "mid_price": 0.0275
+  },
+  {
+   "high": 0.0001,
+   "low": 0.0001,
+   "last": 0.0001,
+   "instrument_name": "BTC-10OCT26-89500-C",
+   "bid_price": null,
+   "ask_price": 0.0001,
+   "open_interest": 15.8,
+   "mark_price": 5.451e-05,
+   "interest_rate": 0.0,
+   "creation_timestamp": 1791485265453,
+   "estimated_delivery_price": 81476.35,
+   "price_change": 0.0,
+   "volume": 6.6,
+   "mark_iv": 55.07,
+   "underlying_price": 81516.14,
+   "underlying_index": "BTC-10OCT26",
+   "base_currency": "BTC",
+   "quote_currency": "BTC",
+   "volume_usd": 54.34,
+   "mid_price": null
+  }
+ ]
+}

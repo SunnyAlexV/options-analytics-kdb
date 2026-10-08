@@ -45,6 +45,7 @@ These are the pieces that separate a demo from a system a desk would actually ru
 | Pricing model | Black-76 on each expiry's forward; inverse (BTC-settled) conventions handled explicitly | Pluggable models for other assets |
 | Surface | Raw SVI per expiry, plus butterfly and calendar arbitrage checks | SSVI (arbitrage-free by construction) |
 | P&L explain | A fixed, realistic hypothetical book (e.g. short 25-delta strangle + long calendar spread) | — |
+| Quote source | `book.{inst}.none.1.100ms` (top of book, sent only on change, ~250–350 rows/s); Deribit marks/forwards via a REST snapshot every 10 s. **Not** `ticker.{inst}.100ms`: measured at ~1,000 msgs/s because it re-sends every option when the index moves. | Live forwards from futures, plus our own put-call-parity forwards |
 | Repo licence | MIT (the KDB-X licence forbids linking with copyleft code) | — |
 | Benchmarks | Publish C++ vs Python timings only; no published timings that involve q unless KX approves in writing | — |
 | CI | GitHub Actions runs the C++ and Python tests; q tests run locally | — |
