@@ -139,6 +139,14 @@ What these do:
 
 This step takes a few minutes.
 
+## Step 6b — Build the C++ pricing library
+
+```bash
+pip install -e .
+```
+
+This compiles the C++ code in `cpp/` and installs it as the Python package `pricing`. It takes about a minute the first time. Rerun it whenever the C++ changes.
+
 ## Step 7 — Set up Git and GitHub inside Ubuntu
 
 ```bash

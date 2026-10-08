@@ -49,6 +49,10 @@ These are the pieces that separate a demo from a system a desk would actually ru
 | Tick architecture | **KX's standard kdb+tick** (`tick.q`, `u.q`, `r.q`) used unmodified, pinned to commit `85c08ff` and downloaded by `scripts/get_kdb_tick.sh` (KX's repo has no licence file, so it isn't redistributed). Our code: generated schema, small RDB/HDB wrappers, gateway, scripts | — |
 | Table conventions | kdb+tick's: first columns `time` (stamped by the tickerplant) and `sym`; exchange and feed times kept as `exch`, `recv`. High-cardinality ids (trade ids) are longs, never symbols | — |
 | Day boundary | Midnight UTC; every q process runs with `TZ=UTC` | — |
+| IV solver | Our own safeguarded Newton (bisection fallback, relative tolerance), statuses instead of guesses for arbitrageable prices. Jäckel's "Let's Be Rational" to be added later as a benchmark | Jäckel LBR |
+| Build | scikit-build-core + CMake + pybind11 (`pip install -e .`); C++ tests with GoogleTest | — |
+| IVs computed | Bid, ask and mid IV for every option (the bid-ask IV width becomes the SVI fit weight in Phase 4) | — |
+| BTC premium convention | V_btc = Black76(F)/F, i.e. zero BTC discount rate, as Deribit does (derived in lessons/04) | — |
 | Repo licence | MIT (the KDB-X licence forbids linking with copyleft code) | — |
 | Benchmarks | Publish C++ vs Python timings only; no published timings that involve q unless KX approves in writing | — |
 | CI | GitHub Actions runs the C++ and Python tests; q tests run locally | — |
@@ -88,10 +92,10 @@ These are the pieces that separate a demo from a system a desk would actually ru
 
 ## Phases
 
-0. **Foundations** — machine setup ✅, first q session, first commit
-1. **Data** — feed handler
-2. **kdb+ core** — tickerplant, real-time DB, historical DB
-3. **C++ pricing** — Black-76, IV solver, full Greek set, tests
+0. **Foundations** — machine setup ✅, first q session ✅, first commit ✅
+1. **Data** — feed handler ✅
+2. **kdb+ core** — tickerplant, real-time DB, historical DB ✅
+3. **C++ pricing** — Black-76, IV solver, full Greek set, tests ✅ (calc engine wiring into the tickerplant comes with Phase 4)
 4. **Vol surface** — SVI calibration and arbitrage checks
 5. **Risk** — portfolio Greeks, scenarios, P&L explain, VaR
 6. **Dashboard**

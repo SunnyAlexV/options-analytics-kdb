@@ -1,0 +1,16 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11>=2.12"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "options-analytics-kdb"
+version = "0.3.0"
+description = "Live options analytics: kdb+/q tick stack, C++ pricing, Python feed and dashboard"
+requires-python = ">=3.10"
+dependencies = ["numpy"]
+license = { text = "MIT" }
+
+[tool.scikit-build]
+wheel.packages = ["pricing"]       # the Python package; CMake installs pricing/_core into it
+cmake.build-type = "Release"
+build-dir = "build/{wheel_tag}"    # keep build files so rebuilds are incremental
