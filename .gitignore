@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# C++ build output
+build/
+*.o
+*.so
+
+# kdb+ licence and data — never commit these
+*.lic
+kdbdata/
+*.log
+
+# Editor / OS
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env

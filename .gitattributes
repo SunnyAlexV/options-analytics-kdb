@@ -1,0 +1,5 @@
+# Store and check out all text files with Linux (LF) line endings,
+# so files edited from Windows and from WSL stay identical.
+* text=auto eol=lf
+*.png binary
+*.jpg binary

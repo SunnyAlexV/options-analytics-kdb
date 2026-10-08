@@ -1,0 +1,27 @@
+# Python environment for options-analytics-kdb
+# Create:   conda env create -f environment.yml
+# Activate: conda activate oak
+# Update:   conda env update -f environment.yml --prune
+name: oak
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  # numerics
+  - numpy
+  - pandas
+  - scipy
+  # C++ <-> Python bridge
+  - pybind11
+  # data feed (Deribit REST + websocket)
+  - requests
+  - websockets
+  # dashboard
+  - streamlit
+  - plotly
+  # testing
+  - pytest
+  - pip
+  - pip:
+      - pykx   # Python <-> kdb+/q
