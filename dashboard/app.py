@@ -17,6 +17,7 @@ from dash.dash_table.Format import Format, Scheme, Sign
 from . import analytics as A
 from . import figures as FG
 from . import theme as th
+from .sources import assets_in, for_asset
 
 MARKET_VIEWS = ["latest_surface", "latest_iv", "latest_ref", "latest_snap", "latest_quote", "latest_fwd",
                 "spot1m", "surf1m", "trades"]
@@ -49,7 +50,7 @@ def table(id_, page_size=None):
 
 def create_app(source, history=None) -> dash.Dash:
     """source: dashboard.sources.GatewaySource or ReplaySource; history: daily index/DVOL frame."""
-    app = dash.Dash(__name__, title="BTC options desk", update_title=None)
+    app = dash.Dash(__name__, title="Crypto options desk", update_title=None)
     vrp = A.vrp_history(history) if history is not None else pd.DataFrame()
 
     market = html.Div([
@@ -66,11 +67,12 @@ def create_app(source, history=None) -> dash.Dash:
                   "arbitrage-free smile by more than half the spread, below −1 cheap. mark = Deribit's own mark IV."),
         html.Div([card(table("m-fwd"), title="Forwards and fits by expiry",
                        note="basis and carry vs the spot index; parity F − Deribit F in USD; D = BTC discount "
-                            "factor from parity; r_btc = the BTC rate it implies, r_se its standard error (on short "
+                            "factor from parity; r_impl = the rate it implies in the premium currency (BTC/ETH for inverse, USDC "
+                            "for linear options), r_se its standard error (on short "
                             "expiries a tiny error in D is a large rate error); fit quality in vol points."),
                   card(graph("m-vrp"))], className="grid g11"),
         html.Div([card(graph("m-oi")), card(graph("m-volume"))], className="grid g11"),
-        card(table("m-tape"), title="Trade tape (latest 60)", note="price in BTC per contract; usd = price × index"),
+        card(table("m-tape"), title="Trade tape (latest 60)", note="price per contract in the premium currency (the coin for BTC/ETH, USDC for *_USDC); usd in dollars"),
     ])
     risk = html.Div([
         html.Div(id="r-tiles", className="tiles"),
@@ -80,7 +82,7 @@ def create_app(source, history=None) -> dash.Dash:
         html.Div([card(graph("r-delta-t")), card(graph("r-vega-t")), card(graph("r-gamma-t")), card(graph("r-pnl-t"))],
                  className="grid g4"),
         html.Div([card(table("r-pos"), title="Positions, live Greeks",
-                       note="delta in BTC, gamma as BTC of delta per 1% move, vega USD per vol point, theta USD per day"),
+                       note="delta in coins, gamma as coins of delta per 1% move, vega USD per vol point, theta USD per day"),
                   card(table("r-var"), title="VaR and Expected Shortfall (USD, 1 day)",
                        note="HS: last 365 days equally weighted. FHS: each day rescaled to today's volatility "
                             "(EWMA 0.94). Backtest: exceptions of VaR 99% over the past year with Kupiec's p-value "
@@ -98,7 +100,9 @@ def create_app(source, history=None) -> dash.Dash:
 
     app.layout = html.Div([
         dcc.Interval(id="tick", interval=2000),
-        html.Div([html.H1("BTC options desk"), html.Span(source.name, className="pill"),
+        html.Div([html.H1("Crypto options desk"), html.Span(source.name, className="pill"),
+                  dcc.Dropdown(id="asset", value="BTC", clearable=False, options=[{"label": "BTC", "value": "BTC"}],
+                               style={"width": "170px"}),
                   html.Span(id="clock", className="meta"), html.Span(id="errors", className="warn")],
                  className="top"),
         dcc.Tabs(id="tabs", value="market", children=[
@@ -122,25 +126,27 @@ def create_app(source, history=None) -> dash.Dash:
          Output("m-chain", "data"), Output("m-chain", "columns"), Output("m-chain", "style_data_conditional"),
          Output("m-fwd", "data"), Output("m-fwd", "columns"), Output("m-vrp", "figure"),
          Output("m-oi", "figure"), Output("m-volume", "figure"), Output("m-tape", "data"), Output("m-tape", "columns"),
-         Output("clock", "children"), Output("errors", "children")],
-        [Input("tick", "n_intervals"), Input("tabs", "value"), Input("m-expiry", "value")])
-    def market_page(_, tab, expiry):
+         Output("clock", "children"), Output("errors", "children"), Output("asset", "options")],
+        [Input("tick", "n_intervals"), Input("tabs", "value"), Input("m-expiry", "value"), Input("asset", "value")])
+    def market_page(_, tab, expiry, asset):
         if tab != "market":
-            return [dash.no_update] * 21 + [_clock(source), dash.no_update]
+            return [dash.no_update] * 21 + [_clock(source), dash.no_update, dash.no_update]
         now = source.now()
-        v = source.views(MARKET_VIEWS)
+        v_all = source.views(MARKET_VIEWS)
+        asset_opts = [{"label": a, "value": a} for a in assets_in(v_all)] or [{"label": "BTC", "value": "BTC"}]
+        v = for_asset(v_all, asset)
         ex = A.expiries(v["latest_surface"], now)
         opts = [{"label": f"{s}  ({d:.0f}d)", "value": s} for s, d in zip(ex["sym"], ex["days"])]
         if expiry not in set(ex["sym"]):                      # default: the expiry nearest 30 days
             expiry = ex.iloc[(ex["days"] - 30).abs().argmin()]["sym"] if len(ex) else None
         h = A.headline(v, now)
         flow = A.trade_flow(v)
-        tiles = [tile("BTC index", _fmt(h["spot"]), f"{h['spot_chg']:+.2%} in view" if math.isfinite(h["spot_chg"]) else ""),
+        tiles = [tile(f"{asset} index", _fmt(h["spot"]), f"{h['spot_chg']:+.2%} in view" if math.isfinite(h["spot_chg"]) else ""),
                  tile("ATM vol 30d", _fmt(h["atm30"] * 100, "{:.2f}%"), "constant maturity, our fits"),
                  tile("Front RR 25Δ", _fmt(h["rr25"] * 100, "{:+.2f}"), h["front"]),
                  tile("Front BF 25Δ", _fmt(h["bf25"] * 100, "{:+.2f}"), h["front"]),
-                 tile("Put/call volume", _fmt(flow["pc_ratio"], "{:.2f}"), "traded BTC, puts ÷ calls"),
-                 tile("Buyer-initiated", _fmt(flow["buy_share"], "{:.0%}"), "share of traded BTC"),
+                 tile("Put/call volume", _fmt(flow["pc_ratio"], "{:.2f}"), "traded size, puts ÷ calls"),
+                 tile("Buyer-initiated", _fmt(flow["buy_share"], "{:.0%}"), "share of traded size"),
                  tile("Expiries fitted", str(h["n_exp"]), "arbitrage-free SVI")]
         sm = A.smile(v, expiry, now) if expiry else {}
         ts = A.term_structure(v, now)
@@ -158,7 +164,7 @@ def create_app(source, history=None) -> dash.Dash:
                 ch_data, ch_cols, ch_style, fw_data, fw_cols, keep(FG.vrp(vrp)),
                 keep(FG.open_interest(oi, expiry or "")), keep(FG.traded_by_strike(flow["by_strike"])),
                 tape_data, tape_cols,
-                _clock(source, now), "; ".join(v.get("_errors", []))]
+                _clock(source, now), "; ".join(v_all.get("_errors", [])), asset_opts]
 
     # ------------------------------------------------------------ risk
     @app.callback(
@@ -167,16 +173,16 @@ def create_app(source, history=None) -> dash.Dash:
          Output("r-delta-t", "figure"), Output("r-vega-t", "figure"), Output("r-gamma-t", "figure"),
          Output("r-pnl-t", "figure"), Output("r-pos", "data"), Output("r-pos", "columns"),
          Output("r-var", "data"), Output("r-var", "columns")],
-        [Input("tick", "n_intervals"), Input("tabs", "value")])
-    def risk_page(_, tab):
+        [Input("tick", "n_intervals"), Input("tabs", "value"), Input("asset", "value")])
+    def risk_page(_, tab, asset):
         if tab != "risk":
             return [dash.no_update] * 14
-        v = source.views(RISK_VIEWS)
+        v = for_asset(source.views(RISK_VIEWS), asset)       # each asset's own book (BTC for now)
         t = A.risk_tiles(v)
         tiles = [tile("Book value", _fmt(t["mtm"]), "USD, mark to model"),
-                 tile("Spot delta", _fmt(t["deltaspot"], "{:+.3f}"), "BTC, smile rule"),
-                 tile("Cash delta", _fmt(t["cashdelta"], "{:+,.0f}"), "USD per +1% BTC"),
-                 tile("Gamma", _fmt(t["gamma"], "{:+.3f}"), "BTC delta per +1%"),
+                 tile("Spot delta", _fmt(t["deltaspot"], "{:+.3f}"), f"{asset.split('_')[0]}, smile rule"),
+                 tile("Cash delta", _fmt(t["cashdelta"], "{:+,.0f}"), "USD per +1% move"),
+                 tile("Gamma", _fmt(t["gamma"], "{:+.3f}"), "delta change per +1%"),
                  tile("Vega", _fmt(t["vega"], "{:+,.0f}"), "USD per vol point"),
                  tile("Theta", _fmt(t["theta"], "{:+,.0f}"), "USD per day"),
                  tile("VaR 99%", _fmt(t.get("var99_fhs")), "USD, 1 day, FHS"),
@@ -197,9 +203,9 @@ def create_app(source, history=None) -> dash.Dash:
                              "Vega by expiry", "USD per vol point")),
                 keep(FG.bars(by_d, "bucket", "vega", "Vega by delta bucket", "USD per vol point", th.AQUA)),
                 keep(FG.bars(fac, "factor", "usd", "Smile-shape exposure", "USD per +1 vol point", th.VIOLET)),
-                keep(FG.series(r1, "deltaspot", "Spot delta", "BTC")),
+                keep(FG.series(r1, "deltaspot", "Spot delta", "coins")),
                 keep(FG.series(r1, "vega", "Vega", "USD / vol pt", color=th.AQUA)),
-                keep(FG.series(r1, "gamma", "Gamma", "BTC per 1%", color=th.ORANGE)),
+                keep(FG.series(r1, "gamma", "Gamma", "coins per 1%", color=th.ORANGE)),
                 keep(FG.pnl_path(A.pnl_path(v))),
                 *_simple_table(pos, {"qty": "{:+.2f}", "entry": "{:,.2f}", "iv": "{:.2%}", "delta": "{:+.3f}",
                                      "gamma_1pct": "{:+.3f}", "vega": "{:+,.0f}", "theta": "{:+,.0f}"})[::-1],
@@ -264,7 +270,7 @@ def _simple_table(df: pd.DataFrame, fmts: dict):
 def _chain_table(ch: pd.DataFrame):
     fm = {"strike": "{:,.0f}", "bsize": "{:,.1f}", "bid": "{:.4f}", "ask": "{:.4f}", "asize": "{:,.1f}",
           "bidiv": "{:.2%}", "midiv": "{:.2%}", "askiv": "{:.2%}", "model": "{:.2%}",
-          "markiv": "{:.2%}", "delta": "{:+.3f}", "gamma": "{:.2e}", "vega": "{:,.1f}", "theta": "{:,.1f}",
+          "markiv": "{:.2%}", "delta": "{:+.3f}", "gamma": "{:.2e}", "vega": "{:,.4g}", "theta": "{:,.4g}",
           "oi": "{:,.1f}", "vol": "{:,.1f}"}
     cols, data = _simple_table(ch.drop(columns=["rich"]) if len(ch) else ch, fm)
     if not cols:
@@ -284,10 +290,10 @@ def _chain_table(ch: pd.DataFrame):
 def _fwd_table(ts: pd.DataFrame):
     if ts.empty:
         return [], []
-    keep = [c for c in ["sym", "days", "F", "basis", "carry", "diff", "D", "r_btc", "r_se", "fsrc", "pairs", "atmvol",
+    keep = [c for c in ["sym", "days", "F", "basis", "carry", "diff", "D", "r_impl", "r_se", "fsrc", "pairs", "atmvol",
                         "rr25", "bf25"] if c in ts]
     return _simple_table(ts[keep], {"days": "{:.1f}", "F": "{:,.0f}", "basis": "{:+.3%}", "carry": "{:+.2%}",
-                                    "diff": "{:+,.1f}", "D": "{:.5f}", "r_btc": "{:+.2%}", "r_se": "±{:.2%}", "pairs": "{:,.0f}",
+                                    "diff": "{:+,.1f}", "D": "{:.5f}", "r_impl": "{:+.2%}", "r_se": "±{:.2%}", "pairs": "{:,.0f}",
                                     "atmvol": "{:.2%}", "rr25": "{:+.2%}", "bf25": "{:+.2%}"})
 
 
@@ -296,7 +302,7 @@ def _tape_table(t: pd.DataFrame):
         return [], []
     keep = t[["time", "sym", "side", "size", "price", "usd", "iv"]].copy()
     keep["iv"] = keep["iv"] / 100
-    return _simple_table(keep, {"size": "{:,.1f}", "price": "{:.4f}", "usd": "{:,.0f}", "iv": "{:.2%}"})
+    return _simple_table(keep, {"size": "{:,.1f}", "price": "{:.4f}", "usd": "{:,.2f}", "iv": "{:.2%}"})
 
 
 def _var_table(v: pd.DataFrame):

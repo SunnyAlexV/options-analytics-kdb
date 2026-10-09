@@ -60,13 +60,16 @@ def density(sm: dict) -> go.Figure:
     if not sm:
         return empty("Risk-neutral density")
     K = sm["F"] * np.exp(sm["k"])
-    pk = sm["density"] / K                                   # density per USD of BTC price at expiry
-    f = go.Figure(go.Scatter(x=K, y=pk * 1e5, mode="lines", fill="tozeroy", name="density",
+    # density of the price at expiry, per 1% of the forward: comparable across coins of any price
+    per_pct = sm["density"] / K * sm["F"] * 0.01
+    under = sm["expiry"].rsplit("-", 1)[0].replace("_USDC", "")
+    f = go.Figure(go.Scatter(x=K, y=per_pct * 100, mode="lines", fill="tozeroy", name="density",
                              line=dict(color=th.AQUA, width=2), fillcolor="rgba(25,158,112,0.15)",
-                             hovertemplate="BTC %{x:,.0f}<br>%{y:.3f} per 100k USD<extra></extra>"))
+                             hovertemplate=under + " %{x:,.4g}<br>%{y:.2f}% per 1% band<extra></extra>"))
     f.add_vline(x=sm["F"], line=dict(color=th.AXIS, width=1))
-    return _h(f, 380, title=f"Implied distribution of BTC at {sm['expiry']}",
-              xaxis_title="BTC price at expiry (USD)", yaxis_title="density (per 100k USD)", showlegend=False)
+    return _h(f, 380, title=f"Implied distribution of {under} at {sm['expiry']}",
+              xaxis_title=f"{under} price at expiry (USD)", yaxis_title="probability per 1% of the forward (%)",
+              showlegend=False)
 
 
 def surface3d(g: dict) -> go.Figure:
@@ -162,7 +165,7 @@ def vrp(v: pd.DataFrame) -> go.Figure:
     prem = v["vrp"].dropna()
     sub = (f"implied minus the realised that followed: mean {prem.mean() * 100:+.1f} pts, "
            f"positive {np.mean(prem > 0):.0%} of days") if len(prem) else ""
-    return _h(f, 320, title=f"Variance risk premium, 5 years<br><sup>{sub}</sup>", yaxis_title="vol (%)",
+    return _h(f, 320, title=f"Variance risk premium, BTC, 5 years<br><sup>{sub}</sup>", yaxis_title="vol (%)",
               margin=dict(t=96))
 
 
@@ -174,7 +177,7 @@ def open_interest(oi: pd.DataFrame, expiry: str) -> go.Figure:
     for cp, c, n in (("C", th.BLUE, "calls"), ("P", th.ORANGE, "puts")):
         if cp in oi:
             f.add_trace(go.Bar(x=oi["strike"], y=oi[cp], name=n, marker=dict(color=c)))
-    return _h(f, 320, title=title, barmode="group", bargap=0.2, xaxis_title="strike", yaxis_title="contracts (BTC)")
+    return _h(f, 320, title=title, barmode="group", bargap=0.2, xaxis_title="strike", yaxis_title="contracts")
 
 
 def traded_by_strike(by: pd.DataFrame) -> go.Figure:
@@ -185,7 +188,7 @@ def traded_by_strike(by: pd.DataFrame) -> go.Figure:
     for cp, c, n in (("C", th.BLUE, "calls"), ("P", th.ORANGE, "puts")):
         if cp in by:
             f.add_trace(go.Bar(x=by["strike"], y=by[cp], name=n, marker=dict(color=c)))
-    return _h(f, 320, title=title, barmode="group", bargap=0.2, xaxis_title="strike", yaxis_title="BTC")
+    return _h(f, 320, title=title, barmode="group", bargap=0.2, xaxis_title="strike", yaxis_title="contracts")
 
 
 # ------------------------------------------------------------------ risk

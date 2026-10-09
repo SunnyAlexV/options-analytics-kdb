@@ -17,6 +17,8 @@ Channels (rates measured 8 Oct 2026, ~950 BTC options):
 - ``book.{inst}.none.1.100ms``    top of book, sent only when it changes   ~340 rows/s
 - ``trades.option.BTC.100ms``     every option trade                       ~0.1 rows/s
 - ``deribit_price_index.btc_usd`` spot index (table "spot")              ~1 row/s
+Settlement groups (--currency): BTC and ETH (inverse, premium in the coin) and USDC
+(linear, premium in USDC: SOL, XRP, AVAX, HYPE, TRX, BTC, ETH), with one index per coin.
 We deliberately do NOT use ``ticker.{inst}.100ms``: it re-sends every
 instrument whenever the index moves (~1,000 msgs/s, ~770 KB/s) because
 Deribit's marks and Greeks change, even when no quote has changed.
@@ -57,6 +59,7 @@ class DeribitFeed:
         self.ref_every = ref_every
 
         self.buffers: dict[str, list[dict]] = defaultdict(list)
+        self.bad = 0                                    # malformed messages skipped
         self.quality = QualityMonitor(currency)
         self.http = requests.Session()
 
@@ -122,6 +125,9 @@ class DeribitFeed:
                 reason = "silent"
             except Exception as e:                    # network drop, server close, ...
                 reason = type(e).__name__
+                rcvd = getattr(e, "rcvd", None)       # a close frame from the server: say why
+                if rcvd is not None:
+                    reason += f" {rcvd.code} {rcvd.reason}".rstrip()
             self.ws = None
             lost_at = self.last_msg_ns or now_ns()
             print(f"Feed: connection lost ({reason}); reconnecting in {backoff:.0f}s")
@@ -132,8 +138,7 @@ class DeribitFeed:
         # Ask Deribit to send a heartbeat every HEARTBEAT_S. If we stop hearing
         # anything for SILENCE_S, _read_loop times out and we reconnect.
         await self._send(ws, "public/set_heartbeat", {"interval": HEARTBEAT_S})
-        fixed = [f"trades.option.{self.currency}.100ms",
-                 f"deribit_price_index.{self.currency.lower()}_usd"]
+        fixed = [f"trades.option.{self.currency}.100ms"] + self._index_channels()
         await self._subscribe(ws, fixed + [self._book(s) for s in sorted(self.instruments)])
         print(f"Feed: connected, subscribed to {len(self.instruments)} {self.currency} options")
 
@@ -148,23 +153,40 @@ class DeribitFeed:
         method = msg.get("method")
         if method == "subscription":
             channel = msg["params"]["channel"]
-            data = msg["params"]["data"]
-            kind = channel.split(".", 1)[0]
-            if kind == "book":
-                q = N.book_to_quote(data, recv)
-                self.emit("quote", [q])
-                self.emit("dq", self.quality.on_quote(q))
-            elif kind == "trades":
-                for t in N.trades_to_rows(data, recv):
-                    self.emit("trade", [t])
-                    self.emit("dq", self.quality.on_trade(t))
-            elif kind == "deribit_price_index":
-                self.emit("spot", [N.index_to_row(data, recv)])
+            try:
+                self._dispatch(channel, msg["params"]["data"], recv)
+            except (ValueError, KeyError, TypeError) as e:
+                # one malformed message must not cost the connection (a reconnect drops ~10 s
+                # of every instrument's data); count it, show the first few, carry on
+                self.bad += 1
+                if self.bad <= 5:
+                    print(f"Feed: skipped a malformed {channel} message ({type(e).__name__}: {e})")
         elif method == "heartbeat":
             if msg["params"].get("type") == "test_request":
                 await self._send(ws, "public/test", {})   # "yes, I'm still here"
         elif "error" in msg:
             print("Feed: Deribit error:", msg["error"])
+
+    def _dispatch(self, channel: str, data, recv: int) -> None:
+        kind = channel.split(".", 1)[0]
+        if kind == "book":
+            q = N.book_to_quote(data, recv)
+            self.emit("quote", [q])
+            self.emit("dq", self.quality.on_quote(q))
+        elif kind == "trades":
+            for t in N.trades_to_rows(data, recv):
+                self.emit("trade", [t])
+                self.emit("dq", self.quality.on_trade(t))
+        elif kind == "deribit_price_index":
+            self.emit("spot", [N.index_to_row(data, recv)])
+
+    def _index_channels(self) -> list[str]:
+        """BTC/ETH (inverse): one USD index. USDC (linear): one USDC index per coin listed,
+        e.g. sol_usdc, xrp_usdc, btc_usdc."""
+        if self.currency != "USDC":
+            return [f"deribit_price_index.{self.currency.lower()}_usd"]
+        bases = sorted({s.split("_", 1)[0].lower() for s in self.instruments})
+        return [f"deribit_price_index.{b}_usdc" for b in bases]
 
     @staticmethod
     def _book(sym: str) -> str:

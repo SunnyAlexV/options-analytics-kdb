@@ -136,6 +136,40 @@ def test_handle_routes_messages_and_answers_heartbeats():
     assert ws.sent[-1]["method"] == "public/test"                # heartbeat answered
 
 
+# a real ETH trade (Deribit, 9 Oct 2026): ETH and USDC trade ids carry a prefix, BTC's do not
+ETH_TRADE = {"jsonrpc": "2.0", "method": "subscription", "params": {"channel": "trades.option.ETH.100ms", "data": [
+    {"timestamp": 1791548449981, "iv": 35.22, "price": 0.0065, "amount": 1.0, "direction": "buy",
+     "index_price": 2499.07, "instrument_name": "ETH-11OCT26-2480-P", "trade_seq": 14, "mark_price": 0.006447,
+     "tick_direction": 1, "trade_id": "ETH-313151839", "contracts": 1.0}]}}
+
+
+def test_prefixed_trade_ids():
+    assert N.trade_id("407123456") == 407123456 and N.trade_id(407123456) == 407123456
+    assert N.trade_id("ETH-313151839") == 313151839
+    assert N.trade_id("SOL_USDC-1234") == 1234
+    row = N.trades_to_rows(ETH_TRADE["params"]["data"], RECV)[0]
+    assert row["tradeid"] == 313151839 and row["asset"] == "ETH" and row["idx"] == 2499.07
+
+
+def test_a_malformed_message_never_drops_the_connection():
+    """Before the fix, ETH's string trade ids raised inside the read loop and cost a reconnect
+    (and ~10 s of every instrument's data) on every trade."""
+    sink, ws = ListSink(), FakeWS()
+    feed = DeribitFeed(sink, currency="ETH")
+    bad = {"method": "subscription", "params": {"channel": "trades.option.ETH.100ms",
+                                                 "data": [{"instrument_name": "ETH-11OCT26-2480-P"}]}}
+
+    async def go():
+        await feed._handle(ws, bad, RECV)                  # must not raise
+        await feed._handle(ws, ETH_TRADE, RECV)
+        await feed._handle(ws, FIX["book"], RECV)
+
+    asyncio.run(go())
+    feed._flush()
+    assert feed.bad == 1
+    assert len(sink.rows["trade"]) == 1 and len(sink.rows["quote"]) == 1
+
+
 # ------------------------------------------------- Python -> q conversion
 QTYPENUM = {"s": 11, "f": 9, "p": 12, "j": 7, "b": 1}   # q type numbers of vectors
 

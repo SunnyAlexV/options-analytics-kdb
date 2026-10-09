@@ -150,15 +150,23 @@ class FakeRDB(FakeServer):
             return kx.toq(self.tables[t].iloc[a:b + 1].reset_index(drop=True))
         if q.startswith("count "):
             return kx.LongAtom(len(self.tables[q.split()[1]]))
+        asset = None                                         # "... where asset=`BTC" / "..., asset=`BTC"
+        if "asset=`" in q:
+            asset = q.split("asset=`")[1].split()[0].rstrip(",")
+            q = q.replace(f", asset=`{asset}", "").replace(f" where asset=`{asset}", "")
+
+        def pick(name):
+            t = self.tables[name]
+            return t if asset is None or "asset" not in t else t[t["asset"] == asset]
         if q.startswith("select last price from "):         # risk: latest spot index
-            t = self.tables[q.split("from ")[1].split()[0]]
+            t = pick(q.split("from ")[1].split()[0])
             return kx.toq(pd.DataFrame({"price": [float(t["price"].iloc[-1]) if len(t) else float("nan")]}))
         if q == "select sym, strike from ref where kind=`option":   # risk: listed strikes
-            r = self.tables["ref"]
+            r = pick("ref")
             return kx.toq(r[r["kind"] == "option"][["sym", "strike"]].reset_index(drop=True))
         if "select by sym from" in q:                        # latest row per sym
             t = q.split("from ")[1].split()[0]
-            return kx.toq(self.tables[t].groupby("sym", sort=False).tail(1).reset_index(drop=True))
+            return kx.toq(pick(t).groupby("sym", sort=False).tail(1).reset_index(drop=True))
         raise ValueError(f"FakeRDB: unexpected query {q!r}")
 
 

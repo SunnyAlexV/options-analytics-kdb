@@ -101,10 +101,10 @@ These are the pieces that separate a demo from a system a desk would actually ru
 2. **kdb+ core** — tickerplant, real-time DB, historical DB ✅
 3. **C++ pricing** — Black-76, IV solver, full Greek set, tests ✅ (calc engine wiring into the tickerplant comes with Phase 4)
 4. **Vol surface** — live engine, parity forwards, SVI raw + arbitrage-free, evaluation harness ✅
-5. **Risk** — portfolio Greeks, vega buckets, scenario grid, P&L explain, VaR/ES with backtest ✅ (smile-rule verdict: pending a 4-hour live run, `scripts/eval_smile_rules.py`)
-6. **Dashboard** — Dash + Plotly, Market / Risk / System pages over the gateway; public-demo build ready (deploy after the 4-hour run) ✅
+5. **Risk** — portfolio Greeks, vega buckets, scenario grid, P&L explain, VaR/ES with backtest ✅ (smile-rule verdict, 4 h of live BTC data on 9 Oct 2026: sticky-moneyness, R = 0, won both folds; [results/phase5_smile_rules.md](results/phase5_smile_rules.md))
+6. **Dashboard** — Dash + Plotly, Market / Risk / System pages over the gateway; public-demo bundle recorded (Hugging Face deploy next) ✅
 7. **Polish** — benchmarks, CI, README, design document, demo video
-8. **Multi-asset** — see below
+8. **Multi-asset** — see below. 8a (every Deribit coin: ETH + 7 USDC coins, inverse and linear conventions) ✅; India on hold (no broker API account)
 
 ## Phase 8: multi-asset (after the crypto version is complete)
 
@@ -116,7 +116,7 @@ These are the pieces that separate a demo from a system a desk would actually ru
 
 | Market | Instruments | Data route (non-professional prices, Oct 2026) |
 |---|---|---|
-| Crypto | BTC (done), ETH, Deribit USDC-settled alts (linear) | Deribit websocket, free |
+| Crypto | BTC, ETH and all seven Deribit USDC-settled coins (linear) — **done (Phase 8a)**; cross-asset risk next | Deribit websocket, free |
 | US | SPX/SPY index options, single stocks; CME futures options (FX incl. GBP, rates, crude) | Interactive Brokers API: OPRA $1.50/mo, CME $1.25/mo, each waived above $20/mo commissions. ThetaData Standard ($80/mo) later for full SPX chains |
 | India | NSE Nifty and Bank Nifty options (European, cash-settled, weekly expiries) | Upstox market-data websocket (free) or Zerodha Kite Connect (Rs 500/mo) |
 | UK | FTSE 100 index options (ICE Futures Europe); GBP via CME FX options | Live FTSE is expensive (ICE Financials ~$122/mo via IB): start with ICE end-of-day settlements (to confirm) + CME GBP options live |

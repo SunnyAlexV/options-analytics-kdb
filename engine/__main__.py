@@ -30,48 +30,85 @@ from .ipc import Subscriber, records  # noqa: E402,F401  (records: used by tests
 TABLES = ("ref", "snap", "quote")
 
 
+def in_group(asset: str, group: str) -> bool:
+    """Which assets a settlement group's engine handles: BTC -> BTC, ETH -> ETH,
+    USDC -> every *_USDC coin (SOL_USDC, XRP_USDC, BTC_USDC, ...)."""
+    return asset.endswith("_USDC") if group == "USDC" else asset == group
+
+
 class Runner:
+    """One engine process per settlement group, holding one SurfaceEngine per coin. The
+    tickerplant sends every asset to every subscriber, so rows outside the group are ignored."""
+
     def __init__(self, args):
         self.args = args
-        cfg = EngineConfig(throttle_s=args.throttle)
-        self.eng = SurfaceEngine(cfg, asset=args.currency)
+        self.group = args.currency
+        self.cfg = EngineConfig(throttle_s=args.throttle)
+        self.engines: dict[str, SurfaceEngine] = {}
         self.out = TickerplantSink(port=args.tp_port)
         self.t_stats = time.monotonic()
         self.n = {"quote": 0, "iv": 0, "surface": 0, "fwd": 0}
 
+    @property
+    def eng(self) -> SurfaceEngine:
+        """The single engine of a one-coin group (BTC, ETH); kept for tests and tools."""
+        return self.engines.get(self.group) or self._engine(self.group)
+
+    def _engine(self, asset: str) -> SurfaceEngine:
+        if asset not in self.engines:
+            self.engines[asset] = SurfaceEngine(self.cfg, asset=asset)   # convention from the asset name
+        return self.engines[asset]
+
+    def _route(self, rows):
+        by: dict[str, list] = {}
+        for r in rows:
+            a = r.get("asset") or self.group
+            if in_group(a, self.group):
+                by.setdefault(a, []).append(r)
+        return by
+
     def bootstrap(self):
         """Load today's state (instruments, latest forwards and quotes) from the RDB."""
         with kx.SyncQConnection(port=self.args.rdb_port, no_ctx=True) as c:
-            self.eng.on_ref(records(c("0!select by sym from ref")))
-            self.eng.on_snap(records(c("0!select by sym from snap")))
-            self.eng.on_quotes(records(c("0!select by sym from quote")))   # state only, not published
-        print(f"Engine: bootstrapped {len(self.eng.ref)} instruments, {len(self.eng.book)} quotes", flush=True)
+            for t, fn in (("ref", "on_ref"), ("snap", "on_snap"), ("quote", "on_quotes")):
+                for a, rows in self._route(records(c(f"0!select by sym from {t}"))).items():
+                    getattr(self._engine(a), fn)(rows)        # quotes: state only, not published
+        n_ref = sum(len(e.ref) for e in self.engines.values())
+        n_book = sum(len(e.book) for e in self.engines.values())
+        print(f"Engine[{self.group}]: bootstrapped {len(self.engines)} assets, {n_ref} instruments, "
+              f"{n_book} quotes", flush=True)
 
     def handle(self, table: str, rows: list[dict]):
-        if table == "ref":
-            self.eng.on_ref(rows)
-        elif table == "snap":
-            self.eng.on_snap(rows)
-        elif table == "quote":
-            ivs = self.eng.on_quotes(rows)
-            self.n["quote"] += len(rows)
-            if ivs:
-                self.out.publish("iv", ivs)
-                self.n["iv"] += len(ivs)
+        for a, part in self._route(rows).items():
+            e = self._engine(a)
+            if table == "ref":
+                e.on_ref(part)
+            elif table == "snap":
+                e.on_snap(part)
+            elif table == "quote":
+                ivs = e.on_quotes(part)
+                self.n["quote"] += len(part)
+                if ivs:
+                    self.out.publish("iv", ivs)
+                    self.n["iv"] += len(ivs)
 
     def tick(self):
-        fwd, surf = self.eng.refit(time.time_ns())
-        if fwd:
-            self.out.publish("fwd", fwd)
-            self.n["fwd"] += len(fwd)
-        if surf:
-            self.out.publish("surface", surf)
-            self.n["surface"] += len(surf)
+        now = time.time_ns()
+        for e in list(self.engines.values()):
+            fwd, surf = e.refit(now)
+            if fwd:
+                self.out.publish("fwd", fwd)
+                self.n["fwd"] += len(fwd)
+            if surf:
+                self.out.publish("surface", surf)
+                self.n["surface"] += len(surf)
         if time.monotonic() - self.t_stats >= 30:
             el = time.monotonic() - self.t_stats
-            fit_ms = 1e3 * self.eng.stats["fit_s"] / max(self.eng.stats["refits"], 1)
-            print(f"Engine: {self.n['quote'] / el:,.0f} quotes/s -> {self.n['iv'] / el:,.0f} ivs/s, "
-                  f"{self.n['surface'] / el:.1f} surface rows/s, {fit_ms:.1f} ms per refit", flush=True)
+            fit_s = sum(e.stats["fit_s"] for e in self.engines.values())
+            refits = sum(e.stats["refits"] for e in self.engines.values())
+            print(f"Engine[{self.group}]: {len(self.engines)} assets, {self.n['quote'] / el:,.0f} quotes/s -> "
+                  f"{self.n['iv'] / el:,.0f} ivs/s, {self.n['surface'] / el:.1f} surface rows/s, "
+                  f"{1e3 * fit_s / max(refits, 1):.1f} ms per refit", flush=True)
             self.n = dict.fromkeys(self.n, 0)
             self.t_stats = time.monotonic()
 
@@ -119,7 +156,7 @@ def main():
     ap.add_argument("--tp-port", type=int, default=5010)
     ap.add_argument("--rdb-port", type=int, default=5011)
     ap.add_argument("--throttle", type=float, default=0.5, help="refit an expiry at most this often (s)")
-    ap.add_argument("--currency", default="BTC")
+    ap.add_argument("--currency", default="BTC", help="settlement group: BTC, ETH or USDC (all *_USDC coins)")
     args = ap.parse_args()
     r = Runner(args)
     try:

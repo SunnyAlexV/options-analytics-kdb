@@ -57,8 +57,9 @@ def check(ok: bool, what: str) -> None:
 
 
 def show_logs(lines: int = 15) -> None:
-    for name in ("tp", "hdb", "rdb", "gw", "feed", "engine", "risk", "dash"):
-        f = Path(ENV["DATA"]) / "logs" / f"{name}.log"
+    logs = Path(ENV["DATA"]) / "logs"
+    for f in sorted(logs.glob("*.log")) if logs.exists() else []:
+        name = f.stem
         if f.exists():
             print(f"----- {name}.log -----")
             print("\n".join(f.read_text(errors="replace").splitlines()[-lines:]))
@@ -107,8 +108,39 @@ def main() -> int:
         neg = q("rdb", "exec sum afming<0 from select by sym from surface")
         check(neg == 0, "arbitrage-free smiles have no negative density")
     if c1.get("fwd", 0):
-        dd = q("rdb", "exec med abs diff from select by sym from fwd where not null diff")
-        print(f"  INFO  median |parity forward - Deribit forward|: {dd:.2f} USD")
+        dd = q("rdb", "exec med abs diff from select by sym from fwd where not null diff, asset=`BTC")
+        print(f"  INFO  median |parity forward - Deribit forward|, BTC: {dd:.2f} USD")
+
+    print("\n[2b2] every Deribit coin: BTC and ETH (inverse), the USDC coins (linear)")
+    if c1.get("surface", 0):
+        fitted = q("rdb", "exec asset from select by asset from surface")
+        fitted = sorted(a.decode() if isinstance(a, bytes) else str(a) for a in fitted)
+        usdc = [a for a in fitted if a.endswith("_USDC")]
+        print(f"  INFO  assets with fitted smiles: {', '.join(fitted)}")
+        check("BTC" in fitted and "ETH" in fitted, "inverse BTC and ETH smiles fitted")
+        check(len(usdc) >= 5, f"linear USDC smiles fitted for {len(usdc)} coins (expect 7)")
+        ivs = q("rdb", "exec med midiv by asset from iv where not null midiv")
+        bad = {str(k): v for k, v in ivs.items() if not 0.1 < v < 3.0}
+        check(not bad, "median implied vol plausible for every coin" + (f" (implausible: {bad})" if bad else ""))
+        # the same BTC forward, read off inverse and linear options with their own conventions
+        # (plain lists, not a table: a keyed-table round trip through PyKX is version-dependent)
+        try:
+            txt = lambda x: x.decode() if isinstance(x, bytes) else str(x)          # noqa: E731
+            syms, fwds = q("rdb", "{t:0!select last F by sym from surface where asset in `BTC`BTC_USDC, not null F;"
+                                  " (string t`sym; t`F)}[]")
+            by: dict[str, dict[str, float]] = {}
+            for sm, f in zip(syms, fwds):
+                asset, lbl = txt(sm).split("-", 1)                                  # BTC_USDC-30OCT26
+                by.setdefault(lbl, {})[asset] = float(f)
+            gaps = sorted(abs(v["BTC_USDC"] / v["BTC"] - 1) * 1e4 for v in by.values() if len(v) == 2)
+            if gaps:
+                gap = gaps[len(gaps) // 2]
+                print(f"  INFO  inverse vs linear BTC forward, {len(gaps)} common expiries: median gap {gap:.1f} bp")
+                check(gap < 50, "inverse and linear BTC options imply the same forward (within 50 bp)")
+            else:
+                print("  INFO  inverse/linear comparison: no expiry fitted in both books yet")
+        except Exception as e:
+            print(f"  INFO  inverse/linear comparison skipped ({type(e).__name__}: {e})")
 
     print("\n[2c] risk (sample book, smile rule R = " + ENV.get("RISK_R", "0") + ")")
     check(c1.get("pos", 0) >= 5, f"positions published ({c1.get('pos', 0)} rows)")

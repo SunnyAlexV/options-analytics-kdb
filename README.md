@@ -1,6 +1,6 @@
 # options-analytics-kdb
 
-A live options analytics system for BTC options on Deribit. It is built the way an options desk builds one:
+A live options analytics system for every option Deribit lists: BTC and ETH (coin-settled) and seven USDC-settled coins (BTC, ETH, SOL, XRP, AVAX, TRX, HYPE). It is built the way an options desk builds one:
 
 - **kdb+/q** for tick capture, storage and queries, on KX's standard kdb+tick architecture
 - **C++** for pricing, implied vol and calibration
@@ -90,6 +90,8 @@ A second real-time process takes the fitted smiles and, for a book of positions,
 
 **How the smile moves when BTC moves** decides every delta. One parameter, Bergomi's skew-stickiness ratio R, covers sticky-strike (R = 1), sticky-moneyness (R = 0) and everything between. R is **measured from recorded data** and the rules are scored by which one hedges better out of sample, under a decision rule fixed before the data was seen. Run `python scripts/eval_smile_rules.py --gw 5013 --start <date> --report` after a few hours of live data; it writes `results/phase5_smile_rules.md`.
 
+**Verdict on 4 hours of live BTC data (9 Oct 2026): sticky-moneyness (R = 0)** won the pre-registered test on both folds. The margin over sticky-strike was small (under 1% of hedged-P&L RMSE), and a freely estimated R overfit badly (|R̂| in the tens, with standard errors as large), so the system runs with R = 0. Full tables: [results/phase5_smile_rules.md](results/phase5_smile_rules.md).
+
 Details are in [lessons/06](lessons/06-risk.md).
 
 ## Dashboard (Phase 6)
@@ -123,7 +125,15 @@ A dark trading-desk dashboard (Dash + Plotly), refreshed every 2 seconds through
 ![Market page](docs/img/dashboard-market.jpg)
 ![Risk page](docs/img/dashboard-risk.jpg)
 
+With several coins running, an **asset selector** in the header switches every Market panel between them (risk stays on the BTC book).
+
 A **public demo** replays a recorded session through the same app on a Hugging Face Space, with no kdb+ or C++ needed (`scripts/make_demo_bundle.py`, `scripts/deploy_demo.py`). Details: [lessons/07](lessons/07-dashboard.md).
+
+## Every Deribit coin (Phase 8a)
+
+One feed and one engine process per settlement group (`FEED_GROUPS="BTC ETH USDC"`); the USDC engine holds one surface per coin. The only market-specific code is the **premium convention** (`engine/conventions.py`): coin-settled options are *inverse* (V = D·Black/F), USDC options *linear* (V = D·Black); one put-call parity regression serves both.
+
+**Check:** Deribit lists BTC and ETH in both conventions, as separate order books. Fitted independently, the two books agree to a median of **−0.02 vol points** in ATM vol over 14 expiries, with risk reversals and butterflies within about a tenth of a vol point ([results/phase8_multi_crypto.md](results/phase8_multi_crypto.md), `scripts/cross_convention.py`). Details: [lessons/08](lessons/08-multi-crypto.md).
 
 ## Credits and licences
 

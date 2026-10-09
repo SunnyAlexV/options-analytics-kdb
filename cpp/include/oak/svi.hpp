@@ -14,7 +14,7 @@
 //   2. fit: Levenberg-Marquardt on all 5 parameters, minimising implied-vol errors
 //      in units of each quote's half bid-ask spread. Optionally arbitrage-free:
 //      penalties drive butterfly (density g(k) >= 0), calendar (w_T >= w_prev) and
-//      Roger Lee (b(1+|rho|) <= 4) violations to zero.
+//      Roger Lee (wing slope <= 2: b(1+|rho|) <= 2) violations to zero.
 #pragma once
 
 #include <vector>
@@ -58,7 +58,7 @@ struct FitResult {
     double inside_band;  // fraction of points whose fitted vol lies within [bid IV, ask IV]
     double min_g;        // minimum of g(k) on the grid (< 0: butterfly arbitrage)
     double max_cal;      // max of w_prev(k) - w(k) on the grid (> 0: calendar arbitrage)
-    double lee;          // b(1+|rho|) (must be <= 4)
+    double lee;          // b(1+|rho|), the steeper wing slope of total variance (Lee: must be <= 2)
     int iterations;
     bool ok;
 };

@@ -154,7 +154,8 @@ def surface_grid(views: dict, now: pd.Timestamp, n_z: int = 61, zmax: float = 2.
 
 def term_structure(views: dict, now: pd.Timestamp) -> pd.DataFrame:
     """Per expiry: ATM vol, RR25, BF25, forward, basis to spot and the annualised carry it implies,
-    and our parity forward vs Deribit's, with the BTC discount factor and the rate it implies."""
+    and our parity forward vs Deribit's, with the discount factor and the rate it implies, in the
+    premium currency (BTC or ETH for inverse options, USDC for linear ones)."""
     ex = expiries(views["latest_surface"], now)
     if ex.empty:
         return ex
@@ -166,7 +167,7 @@ def term_structure(views: dict, now: pd.Timestamp) -> pd.DataFrame:
     out["carry"] = np.log(out["F"] / spot) / T                     # annualised, continuously compounded
     if fw is not None:
         out = out.merge(fw.rename(columns={"fsrc": "fwd_src", "n": "pairs"}), on="sym", how="left")
-        out["r_btc"] = -np.log(out["D"]) / T                       # BTC rate implied by parity's D
+        out["r_impl"] = -np.log(out["D"]) / T                      # premium-currency rate implied by parity's D
         # its standard error, from the regression's error on D (delta method: d r = -dD / (D T)).
         # Short expiries have tiny T, so a small error in D is a large error in r: read r with r_se.
         out["r_se"] = out["seD"] / (out["D"] * T)
@@ -235,7 +236,10 @@ def trade_flow(views: dict) -> dict:
         return {"tape": t, "by_strike": pd.DataFrame(), "pc_ratio": np.nan, "buy_share": np.nan}
     ref = views["latest_ref"][["sym", "strike", "cp"]]
     t = t.merge(ref, on="sym", how="left")
-    t = t.assign(usd=t["price"] * t["idx"], expiry=t["sym"].map(label))
+    # inverse options (BTC, ETH) are priced in the coin: USD = price x index. Linear *_USDC
+    # options are priced in USDC already.
+    linear = t["sym"].map(label).str.contains("_USDC-")
+    t = t.assign(usd=np.where(linear, t["price"], t["price"] * t["idx"]), expiry=t["sym"].map(label))
     by = t.groupby(["strike", "cp"])["size"].sum().unstack(fill_value=0).reset_index()
     calls = t.loc[t["cp"] == "C", "size"].sum()
     puts = t.loc[t["cp"] == "P", "size"].sum()

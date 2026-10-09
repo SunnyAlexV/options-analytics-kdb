@@ -55,13 +55,16 @@ class RiskProcess:
 
     # --------------------------------------------------------------- state
     def bootstrap(self):
+        # the tickerplant carries every coin: take this process's asset only (the spot table
+        # holds btc_usd, eth_usd, sol_usdc, ... side by side, so "last price" alone is wrong)
+        a = f"`{self.asset}"
         with kx.SyncQConnection(port=self.args.rdb_port, no_ctx=True) as c:
-            for r in records(c("0!select by sym from surface")):
+            for r in records(c(f"0!select by sym from surface where asset={a}")):
                 self.surface[r["sym"]] = r
-            sp = records(c("select last price from spot"))
+            sp = records(c(f"select last price from spot where asset={a}"))
             if sp and np.isfinite(sp[0]["price"]):
                 self.spot = sp[0]["price"]
-            for r in records(c("select sym, strike from ref where kind=`option")):
+            for r in records(c(f"select sym, strike from ref where kind=`option, asset={a}")):
                 self.listed.setdefault("-".join(r["sym"].split("-")[:2]), []).append(r["strike"])
         print(f"Risk: bootstrapped {len(self.surface)} smiles, spot {self.spot:,.0f}", flush=True)
         if self.args.book:

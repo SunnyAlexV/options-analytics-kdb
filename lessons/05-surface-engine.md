@@ -98,7 +98,9 @@ The implied probability density is g(k)/√(2πw)·exp(−d₂²/2), so **g < 0 
 
 **Calendar arbitrage.** At every k, total variance must not fall as expiry lengthens: w(k, T₂) ≥ w(k, T₁).
 
-**Lee's bound.** b(1 + |ρ|) ≤ 4: the wings can't be steeper than no-arbitrage allows.
+**Lee's bound.** Roger Lee's moment formula: total variance can grow at most 2|k| far out in the wings. Raw SVI's wing slopes are b(1 ± ρ), so the condition is **b(1 + |ρ|) ≤ 2**.
+
+*Correction (9 Oct 2026):* this was first implemented as ≤ 4. That 4 is Gatheral–Jacquier's condition θφ(θ)(1+|ρ|) ≤ 4 for **SSVI**, whose wing slope is half that expression, so it's the same slope bound of 2, written for a different parametrisation. BTC fits never came near either limit. The error showed up on Deribit's SOL options, where a sparse 7-day smile sat exactly at b(1+ρ) = 4.0 and its wings exploded. The fit is now held to 2.
 
 **The arbitrage-free fit** adds penalties for every violation on a grid of strikes, raising the penalty from 10² to 10¹², and fits expiries in order, shortest first, so each respects the one before it.
 

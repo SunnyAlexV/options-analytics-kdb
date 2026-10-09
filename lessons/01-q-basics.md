@@ -236,7 +236,7 @@ Do vols rise or fall as strikes go up? That shape is what SVI will fit.
 
 ## Exercises — try these before looking anything up
 
-1. What fraction of all options have no bid? (Hint: `avg null quote`bid` — why does `avg` give a fraction here?)
+1. What fraction of all options have no bid? (Hint: ``avg null quote`bid`` — why does `avg` give a fraction here?)
 2. Which expiry has the highest total open interest? (`sum oi` … `by expiry`, then sort.)
 3. Add a column `k` = log-moneyness ln(strike/und), using your `lm` function or `log`.
 4. For the 25 Dec 2026 expiry, which strike has the widest spread **as a percentage of mid**? Is it deep in the money or far out of the money, and why would that be?

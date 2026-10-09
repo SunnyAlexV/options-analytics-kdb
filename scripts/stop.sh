@@ -7,7 +7,18 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 source "$ROOT/config.env"
 
 parts=("$@"); [ ${#parts[@]} -eq 0 ] && parts=(dash risk engine feed gw rdb hdb tp)
+# feed and engine run one process per settlement group: feed_BTC, feed_ETH, ... (plus the
+# single-process names of older versions, if one is still running)
+expanded=()
 for p in "${parts[@]}"; do
+  if [ "$p" = feed ] || [ "$p" = engine ]; then
+    [ -f "$RUN/$p.pid" ] && expanded+=("$p")
+    for g in $FEED_GROUPS; do expanded+=("${p}_$g"); done
+  else
+    expanded+=("$p")
+  fi
+done
+for p in "${expanded[@]}"; do
   f="$RUN/$p.pid"
   if [ -f "$f" ] && kill -0 "$(cat "$f")" 2>/dev/null; then
     pid=$(cat "$f")

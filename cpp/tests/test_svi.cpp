@@ -104,7 +104,7 @@ TEST(SVI, ArbitrageFreeFitRemovesButterflyArbitrage) {
                 raw.min_g, raw.rmse_vol * 1e4, af.min_g, af.rmse_vol * 1e4);
     EXPECT_LT(raw.min_g, 0.0);               // the raw fit faithfully reproduces the arbitrage
     EXPECT_GE(af.min_g, 0.0);                // the constrained fit removes it
-    EXPECT_LE(af.lee, 4.0 + 1e-9);
+    EXPECT_LE(af.lee, 2.0 + 1e-9);           // Lee: total-variance wings no steeper than 2|k|
     EXPECT_LT(af.rmse_vol, 0.01);            // at a modest cost in fit quality (< 1 vol pt)
 }
 

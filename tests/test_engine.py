@@ -132,3 +132,18 @@ def test_engine_end_to_end_on_a_known_smile():
     true = smile_metrics(SVI_TRUE, T)
     assert s["atmvol"] == pytest.approx(true["atmvol"], abs=2e-3)
     assert s["rr25"] == pytest.approx(true["rr25"], abs=3e-3)
+
+
+def test_delta_strike_survives_a_badly_behaved_smile():
+    """A sparse 7-day SOL fit (live Deribit data, 9 Oct 2026) whose wings exploded: N(d1) is not
+    monotone over the grid. The lookup must return the crossing nearest the money, or NaN, never
+    the grid edge (the old behaviour, which produced a 1,691-vol-point butterfly)."""
+    bad = [-0.27676, 2.06513, 0.93692, 1.06641, 0.38985]
+    T = 6.8 / 365
+    for d in (0.25, 0.75):
+        k = delta_strike(bad, T, d)
+        assert math.isnan(k) or abs(k) < 1.0
+    m = smile_metrics(bad, T)
+    assert not (abs(m["bf25"]) > 1.0)          # never a huge number: a real value or NaN
+    # and on a sane smile it agrees with the old interpolation
+    assert delta_strike(SVI_TRUE, 0.25, 0.25) == pytest.approx(0.1734, abs=0.02)

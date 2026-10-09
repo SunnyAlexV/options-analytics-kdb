@@ -54,8 +54,11 @@ for p in "${parts[@]}"; do
     hdb)  launch hdb  "$ROOT/q" "$HDB_PORT" "$Q" hdb.q "$HDB" -p "$HDB_PORT" ;;
     rdb)  launch rdb  "$ROOT/q" "$RDB_PORT" "$Q" rdb.q ":$TP_PORT" ":$HDB_PORT" "$HDB" -p "$RDB_PORT" ;;
     gw)   launch gw   "$ROOT/q" "$GW_PORT"  "$Q" gw.q ":$RDB_PORT" ":$HDB_PORT" -p "$GW_PORT" ;;
-    feed) launch feed "$ROOT"   -           "$PY" -u -m feed --tp --tp-port "$TP_PORT" --currency "$CURRENCY" ;;
-    engine) launch engine "$ROOT" -         "$PY" -u -m engine --mode "$ENGINE_MODE" --tp-port "$TP_PORT" --rdb-port "$RDB_PORT" --currency "$CURRENCY" ;;
+    feed)   for g in $FEED_GROUPS; do        # one feed per Deribit settlement group
+              launch "feed_$g" "$ROOT" - "$PY" -u -m feed --tp --tp-port "$TP_PORT" --currency "$g"; done ;;
+    engine) for g in $FEED_GROUPS; do        # one surface engine process per group (one engine per coin inside)
+              launch "engine_$g" "$ROOT" - "$PY" -u -m engine --mode "$ENGINE_MODE" --tp-port "$TP_PORT" \
+                     --rdb-port "$RDB_PORT" --currency "$g"; done ;;
     risk) launch risk "$ROOT" -             "$PY" -u -m risk --tp-port "$TP_PORT" --rdb-port "$RDB_PORT" --currency "$CURRENCY" \
                 --R "$RISK_R" --pnl-every "$RISK_PNL_EVERY" --data "$DATA" ${RISK_BOOK:+--book "$RISK_BOOK"} ;;
     dash) launch dash "$ROOT" "$DASH_PORT"  "$PY" -u -m dashboard --gw "$GW_PORT" --port "$DASH_PORT" \

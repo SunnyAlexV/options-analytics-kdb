@@ -13,8 +13,15 @@ MS = 1_000_000  # nanoseconds per millisecond
 
 
 def asset_of(sym: str) -> str:
-    """'BTC-25DEC26-80000-C' -> 'BTC'."""
+    """'BTC-25DEC26-80000-C' -> 'BTC';  'SOL_USDC-30OCT26-150-C' -> 'SOL_USDC'."""
     return sym.split("-", 1)[0]
+
+
+def index_asset(index_name: str) -> str:
+    """The asset an index prices, named like that asset's options:
+    'btc_usd' -> 'BTC' (inverse BTC options), 'sol_usdc' -> 'SOL_USDC' (linear USDC options)."""
+    base, _, quote = index_name.partition("_")
+    return base.upper() if quote == "usd" else f"{base}_{quote}".upper()
 
 
 def _top(levels: list) -> tuple[float | None, float | None]:
@@ -35,6 +42,14 @@ def book_to_quote(data: dict, recv: int) -> dict:
     }
 
 
+def trade_id(raw) -> int:
+    """Deribit's trade id as a long. BTC ids are plain numbers ("407123456"); ETH and USDC ids
+    carry a prefix ("ETH-313151839", "SOL_USDC-1234"). The number is unique within the
+    prefix, and the prefix is the asset, so (asset, tradeid) stays unique."""
+    s = str(raw)
+    return int(s.rsplit("-", 1)[-1]) if "-" in s else int(s)
+
+
 def trades_to_rows(data: list, recv: int) -> list[dict]:
     """``trades.option.{currency}.100ms`` notification -> ``trade`` rows.
 
@@ -49,16 +64,16 @@ def trades_to_rows(data: list, recv: int) -> list[dict]:
             "price": float(t["price"]), "size": float(t["amount"]),
             "side": t["direction"],            # "buy"/"sell" = aggressor side
             "iv": t.get("iv"), "idx": t.get("index_price"),
-            "tradeid": int(t["trade_id"]),
+            "tradeid": trade_id(t["trade_id"]),
         })
     return rows
 
 
 def index_to_row(data: dict, recv: int) -> dict:
     """``deribit_price_index.{index}`` notification -> one ``spot`` row."""
-    name = data["index_name"]                   # e.g. "btc_usd"
+    name = data["index_name"]                   # e.g. "btc_usd", "sol_usdc"
     return {
-        "sym": name, "asset": name.split("_")[0].upper(),
+        "sym": name, "asset": index_asset(name),
         "exch": data["timestamp"] * MS, "recv": recv, "price": float(data["price"]),
     }
 

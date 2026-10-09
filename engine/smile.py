@@ -9,6 +9,8 @@ from scipy.special import ndtr
 import pricing as px
 from pricing import _core
 
+from .conventions import DERIBIT, Convention
+
 
 @dataclass
 class SliceConfig:
@@ -33,23 +35,24 @@ class SliceData:
     extra: dict = field(default_factory=dict)
 
 
-def quote_ivs(bid_btc, ask_btc, F, D, K, T, cp):
-    """Bid, ask and mid implied vols from BTC quotes.
+def quote_ivs(bid_px, ask_px, F, D, K, T, cp, conv: Convention = DERIBIT):
+    """Bid, ask and mid implied vols from quoted premiums.
 
-    BTC price -> undiscounted USD Black price: V_usd = V_btc * F / D  (lessons/04, section 2).
+    Premium -> undiscounted Black-76 value (engine/conventions.py): inverse (Deribit, BTC)
+    V = p * F / D  (lessons/04, section 2); linear (NSE, INR) V = p / D.
     The mid IV is the IV of the mid price; the half-spread in vol is (askIV - bidIV)/2.
     """
-    to_usd = np.asarray(F, dtype=float) / np.asarray(D, dtype=float)
-    bid = np.asarray(bid_btc, dtype=float) * to_usd
-    ask = np.asarray(ask_btc, dtype=float) * to_usd
+    bid = conv.to_black(bid_px, F, D)
+    ask = conv.to_black(ask_px, F, D)
     biv = px.implied_vol(bid, F, K, T, cp)
     aiv = px.implied_vol(ask, F, K, T, cp)
     miv = px.implied_vol(0.5 * (bid + ask), F, K, T, cp)
     return biv, aiv, miv
 
 
-def build_slice(rows: list, F: float, D: float, T: float, cfg: SliceConfig) -> SliceData | None:
-    """rows: (strike, cp, bid, bsize, ask, asize) for one expiry, BTC prices.
+def build_slice(rows: list, F: float, D: float, T: float, cfg: SliceConfig,
+                conv: Convention = DERIBIT) -> SliceData | None:
+    """rows: (strike, cp, bid, bsize, ask, asize) for one expiry, prices in premium units.
 
     At every strike, use whichever side (call or put) has the tighter market in vol.
     Put-call parity makes them carry the same vol information, so this keeps the
@@ -63,7 +66,7 @@ def build_slice(rows: list, F: float, D: float, T: float, cfg: SliceConfig) -> S
     K, call, bid, bsz, ask, asz = K[ok], call[ok].astype(bool), bid[ok], bsz[ok], ask[ok], asz[ok]
     if len(K) == 0:
         return None
-    biv, aiv, miv = quote_ivs(bid, ask, F, D, K, T, call)
+    biv, aiv, miv = quote_ivs(bid, ask, F, D, K, T, call, conv)
     hs = 0.5 * (aiv - biv)
     good = np.isfinite(biv) & np.isfinite(aiv) & np.isfinite(miv) & (hs > 0) & (hs <= cfg.max_hs)
     good &= np.abs(np.log(K / F)) <= cfg.max_abs_k
@@ -107,12 +110,26 @@ _KGRID = np.linspace(-5.0, 5.0, 4001)       # log-moneyness grid for delta-to-st
 def delta_strike(params, T, call_delta: float) -> float:
     """Log-moneyness k where the forward call delta N(d1) equals call_delta, on the fitted smile.
 
-    d1(k) = (-k + w(k)/2) / sqrt(w(k)). Evaluated on a fine grid in one vectorised call, then
-    interpolated (N(d1) falls as k rises, so the grid is reversed for np.interp).
+    d1(k) = (-k + w(k)/2) / sqrt(w(k)), evaluated on a fine grid in one vectorised call. On a sane
+    smile N(d1) falls steadily as k rises; on a badly behaved fit (wings that explode) it need
+    not, and a plain interpolation over the whole grid then returns garbage. So walk outward from
+    the money (k = 0) towards the target and take the FIRST crossing, interpolated within its grid
+    step; with no crossing, return NaN rather than a number that looks real.
     """
     w = np.maximum(_core.svi_w(list(params), _KGRID), 1e-12)
     nd1 = ndtr((-_KGRID + 0.5 * w) / np.sqrt(w))
-    return float(np.interp(call_delta, nd1[::-1], _KGRID[::-1]))
+    i0 = int(np.argmin(np.abs(_KGRID)))
+    if call_delta <= nd1[i0]:                        # an OTM call delta: search k > 0
+        idx = range(i0, len(_KGRID) - 1)
+        hit = next((j for j in idx if nd1[j] >= call_delta >= nd1[j + 1]), None)
+    else:                                            # an OTM put (call delta above ATM): search k < 0
+        idx = range(i0, 0, -1)
+        hit = next((j - 1 for j in idx if nd1[j - 1] >= call_delta >= nd1[j]), None)
+    if hit is None:
+        return float("nan")
+    y0, y1 = nd1[hit], nd1[hit + 1]
+    f = 0.0 if y0 == y1 else (y0 - call_delta) / (y0 - y1)
+    return float(_KGRID[hit] + f * (_KGRID[hit + 1] - _KGRID[hit]))
 
 
 def smile_metrics(params, T) -> dict:

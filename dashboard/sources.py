@@ -23,8 +23,9 @@ LATEST = ("quote", "iv", "snap", "fwd", "surface", "ref")
 # name -> q query on the RDB. "time" in the RDB is the tickerplant's time of day (a timespan).
 Q = {
     **{f"latest_{t}": f"0!select by sym from {t}" for t in LATEST},
-    "spot1m": "0!select price:last price by time:0D00:01 xbar time from spot",
-    "surf1m": "0!select last atmvol, last rr25, last bf25, last F, last T by sym, time:0D00:01 xbar time from surface",
+    "spot1m": "0!select price:last price by asset, time:0D00:01 xbar time from spot",
+    "surf1m": ("0!select last asset, last atmvol, last rr25, last bf25, last F, last T "
+               "by sym, time:0D00:01 xbar time from surface"),
     "trades": "-500#select from trade",
     "risk_last": "select from risk where time=max time",
     "risk1m": ("0!select last mtm, last deltaspot, last cashdelta, last gamma, last vega, last theta, "
@@ -41,13 +42,30 @@ Q = {
 }
 
 
+def assets_in(views: dict) -> list[str]:
+    """Assets with fitted smiles, BTC first, then the rest alphabetically."""
+    s = views.get("latest_surface")
+    if s is None or s.empty or "asset" not in s:
+        return []
+    return sorted(set(s["asset"]), key=lambda a: (a != "BTC", a))
+
+
+def for_asset(views: dict, asset: str | None) -> dict:
+    """The same views restricted to one asset (tables without an asset column pass through)."""
+    if not asset:
+        return views
+    return {n: (v[v["asset"] == asset].reset_index(drop=True)
+                if isinstance(v, pd.DataFrame) and "asset" in v.columns else v)
+            for n, v in views.items()}
+
+
 def _last_by_sym(df):
     return df.groupby("sym", sort=False).tail(1).reset_index(drop=True)
 
 
 def _bars(df, cols, how="last", by=None):
     if df.empty:
-        return pd.DataFrame(columns=(["sym"] if by else []) + ["time"] + list(cols))
+        return pd.DataFrame(columns=([by] if by else []) + ["time"] + list(cols))
     g = df.assign(time=df["time"].dt.floor(MIN))
     keys = ([by] if by else []) + ["time"]
     return g.groupby(keys, sort=True)[list(cols)].agg(how).reset_index()
@@ -60,8 +78,8 @@ def _at_max_time(df):
 # name -> pandas function(tables up to now) with the same meaning as Q[name]
 P = {
     **{f"latest_{t}": (lambda t: lambda T: _last_by_sym(T[t]))(t) for t in LATEST},
-    "spot1m": lambda T: _bars(T["spot"], ["price"]),
-    "surf1m": lambda T: _bars(T["surface"], ["atmvol", "rr25", "bf25", "F", "T"], by="sym"),
+    "spot1m": lambda T: _bars(T["spot"], ["price"], by="asset"),
+    "surf1m": lambda T: _bars(T["surface"], ["asset", "atmvol", "rr25", "bf25", "F", "T"], by="sym"),
     "trades": lambda T: T["trade"].tail(500).reset_index(drop=True),
     "risk_last": lambda T: _at_max_time(T["risk"]),
     "risk1m": lambda T: _bars(T["risk"][T["risk"]["kind"] == "total"],

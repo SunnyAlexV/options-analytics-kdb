@@ -79,23 +79,39 @@ def events(data: dict[str, list[dict]]):
 
 
 def replay(data, cfg: EngineConfig | None = None, on_output=None):
-    """Drive a fresh engine through the data. on_output(now_ns, iv_rows, fwd_rows, surf_rows, engine)."""
-    eng = SurfaceEngine(cfg)
+    """Drive fresh engines through the data, one per asset (a BTC-only recording gives exactly
+    one engine, as before). on_output(now_ns, iv_rows, fwd_rows, surf_rows, engine) is called
+    for each engine after each batch. Returns the engine (one asset) or a dict asset -> engine."""
+    engines: dict[str, SurfaceEngine] = {}
+
+    def eng_for(asset):
+        if asset not in engines:
+            engines[asset] = SurfaceEngine(cfg, asset=asset)
+        return engines[asset]
+
     ev = events(data)
     i = 0
     while i < len(ev):
         t0 = ev[i][0]
-        batch = {"ref": [], "snap": [], "quote": []}
+        batch: dict[str, dict[str, list]] = {}
         while i < len(ev) and ev[i][0] < t0 + BATCH_NS:
-            batch[ev[i][1]].append(ev[i][2])
+            _, t, r = ev[i]
+            batch.setdefault(r.get("asset") or "BTC", {"ref": [], "snap": [], "quote": []})[t].append(r)
             i += 1
         now = max(t0, ev[i - 1][0])
-        if batch["ref"]:
-            eng.on_ref(batch["ref"])
-        if batch["snap"]:
-            eng.on_snap(batch["snap"])
-        ivs = eng.on_quotes(batch["quote"]) if batch["quote"] else []
-        fw, sf = eng.refit(now)
-        if on_output:
-            on_output(now, ivs, fw, sf, eng)
-    return eng
+        for asset, b in batch.items():
+            eng = eng_for(asset)
+            if b["ref"]:
+                eng.on_ref(b["ref"])
+            if b["snap"]:
+                eng.on_snap(b["snap"])
+            ivs = eng.on_quotes(b["quote"]) if b["quote"] else []
+            fw, sf = eng.refit(now)
+            if on_output:
+                on_output(now, ivs, fw, sf, eng)
+        for asset, eng in engines.items():               # assets with no new rows still refit on time
+            if asset not in batch:
+                fw, sf = eng.refit(now)
+                if on_output and (fw or sf):
+                    on_output(now, [], fw, sf, eng)
+    return next(iter(engines.values())) if len(engines) == 1 else engines

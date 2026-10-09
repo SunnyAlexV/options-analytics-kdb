@@ -59,39 +59,66 @@ def downsample(df: pd.DataFrame, bucket_s: float) -> pd.DataFrame:
 # ------------------------------------------------------------------ from a feed recording
 def from_recording(folder, bucket_s: float = 30, risk_every_s: float = 30, R: float = 0.0,
                    history_cache=None, hist=None, log=print) -> dict[str, pd.DataFrame]:
-    """hist: daily index/DVOL history for VaR; if None it is fetched (cached to history_cache)."""
+    """folder: a feed recording, or a list of them (one per feed group: BTC, ETH, USDC).
+    hist: daily index/DVOL history for VaR; if None it is fetched (cached to history_cache)."""
     from engine.replay import _read_jsonl, replay
 
-    days = sorted(Path(folder).expanduser().glob("[0-9]*"))
+    folders = [folder] if isinstance(folder, (str, Path)) else list(folder)   # one per feed group
+    days = [d for f in folders for d in sorted(Path(f).expanduser().glob("[0-9]*"))]
     raw = {t: [] for t in MARKET}
     for day in days:
         for t in MARKET:
             raw[t] += _read_jsonl(day / f"{t}.jsonl.gz")
     t0 = min(r["recv"] for r in raw["quote"])
-    out = {}
-    for t in ("quote", "trade", "spot", "snap"):
-        out[t] = _frame(t, raw[t], [r["recv"] for r in raw[t]])
-    out["ref"] = _frame("ref", raw["ref"], [t0] * len(raw["ref"]))
-    out["dq"] = _frame("dq", raw["dq"], [r["minute"] + 60 * NS for r in raw["dq"]])
-    out["gap"] = _frame("gap", raw["gap"], [r["end"] for r in raw["gap"]])
-    log(f"market data: {len(raw['quote']):,} quotes, {len(raw['trade'])} trades over "
-        f"{(max(r['recv'] for r in raw['quote']) - t0) / 60e9:.0f} minutes")
+    n_quotes, span = len(raw["quote"]), (max(r["recv"] for r in raw["quote"]) - t0) / 60e9
+    bucket_ns = int(bucket_s * NS)
 
-    # surface engine on a simulated clock (engine/replay.py), exactly as in the harness
-    eng_rows = {"iv": [], "fwd": [], "surface": []}
-    eng_t = {"iv": [], "fwd": [], "surface": []}
+    def thin(rows, ts):
+        """Last row per (sym, bucket), as downsample() would keep, without building the big
+        frame first: a 25-minute recording of all nine coins is ~2.4M quotes and ~2.4M IVs."""
+        last = {}
+        for r, t in zip(rows, ts):
+            last[(r["sym"], t // bucket_ns)] = (r, t)
+        kept = sorted(last.values(), key=lambda x: x[1])
+        return [r for r, _ in kept], [t for _, t in kept]
+
+    # surface engine on a simulated clock (engine/replay.py), exactly as in the harness.
+    # Implied vols are thinned as they arrive (they are the bulk); forwards and smiles are
+    # kept whole because the risk replay below steps through them.
+    iv_last: dict = {}
+    eng_rows = {"fwd": [], "surface": []}
+    eng_t = {"fwd": [], "surface": []}
+    n_iv = 0
 
     def on_output(now, ivs, fw, sf, eng):
-        for t, rows in (("iv", ivs), ("fwd", fw), ("surface", sf)):
+        nonlocal n_iv
+        n_iv += len(ivs)
+        for r in ivs:
+            iv_last[(r["sym"], now // bucket_ns)] = (r, now)
+        for t, rows in (("fwd", fw), ("surface", sf)):
             eng_rows[t] += rows
             eng_t[t] += [now] * len(rows)
 
     tic = _time.time()
     replay({"ref": raw["ref"], "snap": raw["snap"], "quote": raw["quote"]}, on_output=on_output)
-    for t in ENGINE:
+    kept = sorted(iv_last.values(), key=lambda x: x[1])
+    out = {"iv": _frame("iv", [r for r, _ in kept], [t for _, t in kept])}
+    del iv_last, kept
+    for t in ("fwd", "surface"):
         out[t] = _frame(t, eng_rows[t], eng_t[t])
-    log(f"surface engine: {len(eng_rows['iv']):,} implied vols, {len(eng_rows['surface']):,} smiles "
+    log(f"surface engine: {n_iv:,} implied vols, {len(eng_rows['surface']):,} smiles "
         f"({_time.time() - tic:.0f} s)")
+
+    for t in ("quote", "snap"):                                # the busy market tables
+        raw[t] = thin(raw[t], [r["recv"] for r in raw[t]])
+        out[t] = _frame(t, *raw[t])
+        raw[t] = None
+    for t in ("trade", "spot"):
+        out[t] = _frame(t, raw[t], [r["recv"] for r in raw[t]])
+    out["ref"] = _frame("ref", raw["ref"], [t0] * len(raw["ref"]))
+    out["dq"] = _frame("dq", raw["dq"], [r["minute"] + 60 * NS for r in raw["dq"]])
+    out["gap"] = _frame("gap", raw["gap"], [r["end"] for r in raw["gap"]])
+    log(f"market data: {n_quotes:,} quotes, {len(raw['trade'])} trades over {span:.0f} minutes")
 
     surf = [dict(r, now=n) for r, n in zip(eng_rows["surface"], eng_t["surface"])]
     if hist is None:
@@ -106,17 +133,22 @@ def from_recording(folder, bucket_s: float = 30, risk_every_s: float = 30, R: fl
     return out
 
 
-def _risk_offline(surf, spot_rows, ref_rows, every_s, R, hist, log):
-    """The risk process's outputs on a simulated clock (same functions as risk/__main__.py)."""
+def _risk_offline(surf, spot_rows, ref_rows, every_s, R, hist, log, asset="BTC"):
+    """The risk process's outputs on a simulated clock (same functions as risk/__main__.py).
+    Like the live risk process, it books one asset (BTC); a multi-coin recording's other
+    coins are filtered out here."""
     from risk import rows as RR
     from risk import var as varmod
     from risk.book import sample_book
     from risk.core import aggregate, pnl_explain, pnl_rows, position_greeks, scenario_grid
     from risk.market import Market
 
+    mine = lambda r: (r.get("asset") or "BTC") == asset            # noqa: E731
+    surf = [r for r in surf if mine(r)]
+    spot_rows = [r for r in spot_rows if mine(r)]
     listed = {}
     for r in ref_rows:
-        if r.get("kind") == "option":
+        if r.get("kind") == "option" and mine(r):
             listed.setdefault("-".join(r["sym"].split("-")[:2]), []).append(r["strike"])
     spot_t = np.array([r["recv"] for r in spot_rows], dtype=np.int64)
     spot_p = np.array([r["price"] for r in spot_rows], dtype=float)
@@ -146,19 +178,19 @@ def _risk_offline(surf, spot_rows, ref_rows, every_s, R, hist, log):
                 t += int(every_s * NS)
                 continue
             book = sample_book(m, listed, hedge_rule_R=R)
-            add("pos", RR.pos_rows(book, "BTC"), t)
+            add("pos", RR.pos_rows(book, asset), t)
             prev = m
-        add("risk", RR.risk_rows(aggregate(position_greeks(book, m, R=R)), "BTC"), t)
+        add("risk", RR.risk_rows(aggregate(position_greeks(book, m, R=R)), asset), t)
         if t - last_scen >= 60 * NS:
-            add("scen", RR.scen_rows(scenario_grid(book, m, R=R), "sample", "BTC"), t)
+            add("scen", RR.scen_rows(scenario_grid(book, m, R=R), "sample", asset), t)
             ex = pnl_explain(book, prev, m, R=R)
             if not ex.empty and t > prev.asof:
-                add("pnl", RR.pnl_q_rows(pnl_rows(ex), "BTC"), t)
+                add("pnl", RR.pnl_q_rows(pnl_rows(ex), asset), t)
             prev, last_scen = m, t
         if hist is not None and t - last_var >= 900 * NS:
             res = varmod.compute(book, m, hist, R=R)
             bt = varmod.backtest(book, m, hist, R=R)
-            add("vares", RR.vares_rows(res, bt, "sample", "BTC", R), t)
+            add("vares", RR.vares_rows(res, bt, "sample", asset, R), t)
             last_var = t
         t += int(every_s * NS)
     log(f"risk: {len(rows['risk']):,} risk rows, {len(rows['pnl'])} P&L intervals, "

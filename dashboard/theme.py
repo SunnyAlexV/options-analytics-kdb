@@ -52,6 +52,7 @@ body {{ background:{PAGE}; color:{INK}; font-family:{FONT}; margin:0; }}
 .wrap {{ padding: 12px 16px 32px; max-width: 1800px; margin: 0 auto; }}
 .top {{ display:flex; align-items:baseline; gap:16px; flex-wrap:wrap; padding:6px 0 10px;
         border-bottom:1px solid {GRID}; margin-bottom:10px; }}
+.top .Select {{ font-size:12px; }}
 .top h1 {{ font-size:18px; font-weight:600; margin:0; color:{INK}; }}
 .top .meta {{ color:{MUTED}; font-size:12px; }}
 .pill {{ font-size:11px; padding:2px 8px; border-radius:10px; border:1px solid {BORDER}; color:{INK2}; }}

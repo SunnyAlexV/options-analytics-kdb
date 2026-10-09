@@ -2,6 +2,7 @@
 
     python scripts/make_demo_bundle.py --gw 5013 --date 2026.10.09 --out demo/bundle   # from kdb+ (best)
     python scripts/make_demo_bundle.py --recording ~/kdbdata/raw --out demo/bundle     # from a recording
+    python scripts/make_demo_bundle.py --recording ~/rec/BTC ~/rec/ETH ~/rec/USDC --out demo/bundle
 
 From kdb+, the bundle holds exactly what the live system published. From a feed recording,
 the surface engine and risk calculations are re-run offline on a simulated clock.
@@ -22,7 +23,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--gw", type=int, help="gateway port")
     ap.add_argument("--date", help="YYYY.MM.DD, with --gw")
-    ap.add_argument("--recording", help="feed recording folder")
+    ap.add_argument("--recording", nargs="+", help="feed recording folder(s), e.g. one per group")
     ap.add_argument("--out", default="demo/bundle")
     ap.add_argument("--bucket", type=float, default=30, help="busy tables: keep the last row per sym per N s")
     ap.add_argument("--R", type=float, default=0.0, help="smile rule, for --recording")

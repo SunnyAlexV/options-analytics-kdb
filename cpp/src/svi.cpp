@@ -35,6 +35,8 @@ namespace {
 
 constexpr double kInf = std::numeric_limits<double>::infinity();
 constexpr double kMarginG = 1e-4;     // target g(k) >= 1e-4, so g(k) >= 0 holds with room to spare
+constexpr double kLeeMax = 2.0;       // Lee (2004): asymptotic slope of total variance <= 2
+constexpr double kMarginLee = 1e-4;
 constexpr double kMarginCal = 1e-4;   // target w(k) >= w_prev(k) * (1 + 1e-4)
 
 // Solve A x = b (n <= 8) by Gaussian elimination with partial pivoting. false if singular.
@@ -230,7 +232,9 @@ struct Problem {
                 if (!wprev.empty())
                     r.push_back(sl * std::max(0.0, wprev[j] * (1.0 + kMarginCal) - svi_w(p, grid[j])) / s.T);
             }
-            r.push_back(sl * std::max(0.0, p.b * (1.0 + std::fabs(p.rho)) - 4.0));
+            // Lee's moment formula: total variance grows at most 2|k| in the wings. Raw SVI's
+            // wing slopes are b(1 +- rho), so b(1 + |rho|) <= 2 (aimed just inside, like the others).
+            r.push_back(sl * std::max(0.0, p.b * (1.0 + std::fabs(p.rho)) - kLeeMax * (1.0 - kMarginLee)));
         }
     }
     double cost(const SVI& p) const {
@@ -369,7 +373,7 @@ FitResult svi_fit(const Slice& s, const FitConfig& cfg, const SVI* init) {
             th = levenberg_marquardt(pr, th, cfg.max_iter, it);
             total += it;
             const auto d = svi_diagnose(from_theta(th), cfg.prev, pr.grid.front(), pr.grid.back(), cfg.grid);
-            if (d.min_g >= 0.0 && d.max_cal <= 0.0 && d.lee <= 4.0) break;
+            if (d.min_g >= 0.0 && d.max_cal <= 0.0 && d.lee <= kLeeMax) break;
         }
     }
     out.p = from_theta(th);

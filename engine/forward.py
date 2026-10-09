@@ -1,4 +1,7 @@
-"""Forward and BTC discount factor implied by put-call parity, from the whole chain.
+"""Forward and discount factor implied by put-call parity, from the whole chain.
+
+The line fit below serves every premium convention (engine/conventions.py): inverse
+(Deribit, shown in detail here) and linear (NSE, MCX), where C - P = D (F - K).
 
 For Deribit's inverse options (prices in BTC), put-call parity is exact and model-free:
 
@@ -21,6 +24,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .conventions import DERIBIT, Convention
+
 HALF_TICK_BTC = 0.5e-4      # Deribit's option tick is 0.0001 BTC: no quote is more precise than half of it
 
 
@@ -34,8 +39,12 @@ class ParityForward:
     ok: bool
 
 
-def parity_forward(K, c_bid, c_ask, p_bid, p_ask, min_points: int = 3) -> ParityForward:
-    """Weighted regression of (call mid - put mid) on strike. All prices in BTC."""
+def parity_forward(K, c_bid, c_ask, p_bid, p_ask, min_points: int = 3,
+                   conv: Convention = DERIBIT, tick: float | None = None) -> ParityForward:
+    """Weighted regression of (call mid - put mid) on strike, prices in premium units
+    (BTC for Deribit inverse, USDC for Deribit linear, INR for NSE). No quote is more precise
+    than half a tick: the instruments' own tick if given, else the convention's."""
+    half_tick = 0.5 * (tick if tick and tick > 0 else conv.tick)
     K, cb, ca, pb, pa = (np.asarray(x, dtype=float) for x in (K, c_bid, c_ask, p_bid, p_ask))
     good = np.isfinite(cb) & np.isfinite(ca) & np.isfinite(pb) & np.isfinite(pa) & (ca >= cb) & (pa >= pb)
     K, cb, ca, pb, pa = K[good], cb[good], ca[good], pb[good], pa[good]
@@ -44,7 +53,7 @@ def parity_forward(K, c_bid, c_ask, p_bid, p_ask, min_points: int = 3) -> Parity
         return bad
 
     y = 0.5 * (ca + cb) - 0.5 * (pa + pb)
-    var = np.maximum(0.5 * (ca - cb), HALF_TICK_BTC) ** 2 + np.maximum(0.5 * (pa - pb), HALF_TICK_BTC) ** 2
+    var = np.maximum(0.5 * (ca - cb), half_tick) ** 2 + np.maximum(0.5 * (pa - pb), half_tick) ** 2
     keep = np.ones(len(K), dtype=bool)
     for _ in range(2):                                  # fit, drop >4-sigma outliers, refit
         if keep.sum() < min_points:
@@ -64,7 +73,9 @@ def parity_forward(K, c_bid, c_ask, p_bid, p_ask, min_points: int = 3) -> Parity
     if not beta < 0:
         return bad
     cov = cov * max(chi2, 1.0)                          # inflate if the line fits worse than the spreads imply
-    F = -alpha / beta
-    grad = np.array([-1.0 / beta, alpha / beta ** 2])  # dF/d(alpha, beta)
+    F, D = conv.parity_FD(alpha, beta)
+    grad = np.array([-1.0 / beta, alpha / beta ** 2])  # dF/d(alpha, beta): F = -alpha/beta in both conventions
     se_F = float(np.sqrt(grad @ cov @ grad))
-    return ParityForward(float(F), float(alpha), se_F, float(np.sqrt(cov[0, 0])), int(keep.sum()), True)
+    gD = conv.parity_grad_D()
+    se_D = float(np.sqrt(gD @ cov @ gD))
+    return ParityForward(float(F), float(D), se_F, se_D, int(keep.sum()), True)

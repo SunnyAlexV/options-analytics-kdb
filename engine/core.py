@@ -22,6 +22,7 @@ import numpy as np
 import pricing as px
 from pricing import _core
 
+from .conventions import Convention, for_asset
 from .forward import parity_forward
 from .smile import SliceConfig, build_slice, params_of, quote_ivs, smile_metrics
 
@@ -56,9 +57,10 @@ class _Fit:
 
 
 class SurfaceEngine:
-    def __init__(self, cfg: EngineConfig | None = None, asset: str = "BTC"):
+    def __init__(self, cfg: EngineConfig | None = None, asset: str = "BTC", conv: Convention | None = None):
         self.cfg = cfg or EngineConfig()
         self.asset = asset
+        self.conv = conv or for_asset(asset)          # inverse for Deribit coins, linear for NSE
         self.ref: dict[str, tuple[int, float, str, str]] = {}   # sym -> (expiry_ns, strike, cp, expiry label)
         self.book: dict[str, tuple] = {}                         # sym -> (bid, bsize, ask, asize, exch)
         self.by_exp: dict[str, set] = {}                          # expiry label -> syms
@@ -66,6 +68,7 @@ class SurfaceEngine:
         self.deribit_fwd: dict[str, tuple[float, int]] = {}      # expiry -> (und, exch)
         self.fwd: dict[str, tuple[float, float, str]] = {}       # expiry -> (F, D, source) used for pricing
         self.fits: dict[str, _Fit] = {}
+        self.tick_size: dict[str, float] = {}                    # expiry -> option tick (premium units)
         self.dirty: set[str] = set()
         self.last_refit_ns = 0
         self.last_full_ns = 0
@@ -79,6 +82,8 @@ class SurfaceEngine:
             sym = r["sym"]
             label = sym.rsplit("-", 2)[0]                      # BTC-25DEC26-80000-C -> BTC-25DEC26
             self.ref[sym] = (int(r["expiry"]), float(r["strike"]), r["cp"], label)
+            if r.get("tick") is not None and math.isfinite(_f(r.get("tick"))):
+                self.tick_size[label] = max(self.tick_size.get(label, 0.0), float(r["tick"]))
             self.by_exp.setdefault(label, set()).add(sym)
             self.exp_ns[label] = int(r["expiry"])
 
@@ -114,7 +119,7 @@ class SurfaceEngine:
             return []
         F, D, K, T, cp = map(np.asarray, (F, D, K, T, cp))
         bid, ask = np.asarray(bid), np.asarray(ask)
-        biv, aiv, miv = quote_ivs(bid, ask, F, D, K, T, cp)
+        biv, aiv, miv = quote_ivs(bid, ask, F, D, K, T, cp, self.conv)
         g = px.greeks(F, K, T, np.where(np.isfinite(miv), miv, 0.5), cp)
         out = []
         for i, r in enumerate(rows_ok):
@@ -152,7 +157,8 @@ class SurfaceEngine:
             (calls if cp == "C" else puts)[K] = b
         Ks = sorted(set(calls) & set(puts))
         pf = parity_forward(Ks, [calls[k][0] for k in Ks], [calls[k][2] for k in Ks],
-                            [puts[k][0] for k in Ks], [puts[k][2] for k in Ks])
+                            [puts[k][0] for k in Ks], [puts[k][2] for k in Ks], conv=self.conv,
+                            tick=self.tick_size.get(label))
         und, und_t = self.deribit_fwd.get(label, (NAN, 0))
         use_parity = (self.cfg.forward_source == "parity" and pf.ok
                       and pf.se_F / pf.F < self.cfg.fwd_max_rel_se)
@@ -189,7 +195,7 @@ class SurfaceEngine:
         for label in changed:
             F, D, _ = self.fwd.get(label, (NAN, NAN, ""))
             T = (self.exp_ns.get(label, 0) - now_ns) / YEAR_NS
-            sl = build_slice(self._expiry_rows(label), F, D, T, cfg.slice)
+            sl = build_slice(self._expiry_rows(label), F, D, T, cfg.slice, self.conv)
             st = self.fits.setdefault(label, _Fit())
             if sl is None or len(sl.k) < 5:
                 st.raw = None
