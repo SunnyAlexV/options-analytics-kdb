@@ -6,7 +6,9 @@ A live options analytics system for every option Deribit lists: BTC and ETH (coi
 - **C++** for pricing, implied vol and calibration
 - **Python** for the data feed, orchestration and the dashboard
 
-> **Status:** Phases 0–6 complete (feed, kdb+ core, C++ pricing, live vol surface, portfolio risk, dashboard); Phase 7 (polish) next. See [PLAN.md](PLAN.md) for the full design and roadmap.
+**Live demo:** [options-analytics-kdb.streamlit.app](https://options-analytics-kdb.streamlit.app/), a replay of a recorded 4-hour BTC session through the same analytics and charts (it may take a minute to wake up if nobody has visited for a while).
+
+> **Status:** Phases 0–6 complete (feed, kdb+ core, C++ pricing, live vol surface, portfolio risk, dashboard), plus 8a (every Deribit coin); Phase 7 (polish) next. See [PLAN.md](PLAN.md) for the full design and roadmap.
 
 ## Architecture
 
@@ -127,7 +129,7 @@ A dark trading-desk dashboard (Dash + Plotly), refreshed every 2 seconds through
 
 With several coins running, an **asset selector** in the header switches every Market panel between them (risk stays on the BTC book).
 
-A **public demo** on Streamlit Community Cloud replays a recorded 4-hour session through the same analytics and charts, with no kdb+ or C++ needed (`streamlit_app/`, `scripts/thin_bundle.py`). Details: [lessons/07](lessons/07-dashboard.md).
+A **[public demo](https://options-analytics-kdb.streamlit.app/)** on Streamlit Community Cloud replays a recorded 4-hour session through the same analytics and charts, with no kdb+ or C++ needed (`streamlit_app/`, `scripts/thin_bundle.py`). Details: [lessons/07](lessons/07-dashboard.md).
 
 ## Every Deribit coin (Phase 8a)
 
