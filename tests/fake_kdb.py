@@ -162,6 +162,27 @@ class FakeRDB(FakeServer):
         raise ValueError(f"FakeRDB: unexpected query {q!r}")
 
 
+class FakeGateway(FakeServer):
+    """Answers the dashboard's (".gw.rdbq"; query) calls like our gateway + RDB would: it finds the
+    view the query belongs to and computes it with that view's pandas definition, then sends
+    ``time`` back as a time of day (a timespan), as the RDB stores it."""
+
+    def __init__(self, tables: dict[str, pd.DataFrame]):
+        from dashboard.sources import P, Q
+        self.tables, self.P, self.by_query = tables, P, {q: n for n, q in Q.items()}
+        super().__init__()
+
+    def on_message(self, conn, msg, msg_type):
+        parts = list(msg)
+        fn, q = _text(parts[0]), _text(parts[1])
+        if fn != ".gw.rdbq" or q not in self.by_query:
+            raise ValueError(f"FakeGateway: unexpected call {fn} {q!r}")
+        df = self.P[self.by_query[q]](self.tables).copy()
+        if "time" in df.columns and len(df):
+            df["time"] = df["time"] - df["time"].dt.normalize()     # time of day, like the RDB
+        return kx.toq(df.reset_index(drop=True))
+
+
 # ---------------------------------------------------------------- run in a separate process
 # PyKX's connect is a C call that holds Python's GIL while it waits for the server's
 # handshake reply. A fake server running as a thread in the same process could then
@@ -171,7 +192,7 @@ import multiprocessing as mp  # noqa: E402
 
 
 def _child(kind, tables, cmd_q, out_q):
-    srv = FakeTickerplant(tables) if kind == "tp" else FakeRDB(tables)
+    srv = {"tp": FakeTickerplant, "rdb": FakeRDB, "gw": FakeGateway}[kind](tables)
     out_q.put(("port", srv.port))
     while True:
         cmd = cmd_q.get()
@@ -189,7 +210,7 @@ def _child(kind, tables, cmd_q, out_q):
 
 
 class ServerProcess:
-    """A FakeTickerplant ("tp") or FakeRDB ("rdb") running in a child process."""
+    """A FakeTickerplant ("tp"), FakeRDB ("rdb") or FakeGateway ("gw") running in a child process."""
 
     def __init__(self, kind: str, tables: dict[str, pd.DataFrame]):
         ctx = mp.get_context("spawn")

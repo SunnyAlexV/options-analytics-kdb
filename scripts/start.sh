@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Start the system, or chosen parts of it.
-#   bash scripts/start.sh               # everything: tp hdb rdb gw feed engine risk
+#   bash scripts/start.sh               # everything: tp hdb rdb gw feed engine risk dash
 #   bash scripts/start.sh rdb           # just the RDB (e.g. after a crash)
 #   bash scripts/start.sh tp hdb rdb gw # the kdb+ core without the live feed
 # Start order matters: the RDB needs the tickerplant and HDB; the gateway needs both DBs.
@@ -47,7 +47,7 @@ launch() {      # launch <name> <dir> <port or -> <command...>
   fi
 }
 
-parts=("$@"); [ ${#parts[@]} -eq 0 ] && parts=(tp hdb rdb gw feed engine risk)
+parts=("$@"); [ ${#parts[@]} -eq 0 ] && parts=(tp hdb rdb gw feed engine risk dash)
 for p in "${parts[@]}"; do
   case $p in
     tp)   launch tp   "$ROOT/q" "$TP_PORT"  "$Q" tick.q sym "$TPLOG" -p "$TP_PORT" ;;
@@ -58,6 +58,8 @@ for p in "${parts[@]}"; do
     engine) launch engine "$ROOT" -         "$PY" -u -m engine --mode "$ENGINE_MODE" --tp-port "$TP_PORT" --rdb-port "$RDB_PORT" --currency "$CURRENCY" ;;
     risk) launch risk "$ROOT" -             "$PY" -u -m risk --tp-port "$TP_PORT" --rdb-port "$RDB_PORT" --currency "$CURRENCY" \
                 --R "$RISK_R" --pnl-every "$RISK_PNL_EVERY" --data "$DATA" ${RISK_BOOK:+--book "$RISK_BOOK"} ;;
-    *) echo "unknown part: $p (use tp hdb rdb gw feed engine risk)"; exit 1 ;;
+    dash) launch dash "$ROOT" "$DASH_PORT"  "$PY" -u -m dashboard --gw "$GW_PORT" --port "$DASH_PORT" \
+                --history "$DATA/history/btc_daily.csv" ;;
+    *) echo "unknown part: $p (use tp hdb rdb gw feed engine risk dash)"; exit 1 ;;
   esac
 done

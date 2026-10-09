@@ -17,11 +17,13 @@ dependencies:
   # data feed (Deribit REST + websocket)
   - requests
   - websockets
-  # dashboard
-  - streamlit
+  # dashboard (versions as tested; the public demo pins the same in deploy/hf-space)
+  - dash=2.18.2
   - plotly
+  - pyarrow
   # testing
   - pytest
   - pip
   - pip:
       - pykx   # Python <-> kdb+/q
+      - huggingface_hub   # only for uploading the public demo (scripts/deploy_demo.py)

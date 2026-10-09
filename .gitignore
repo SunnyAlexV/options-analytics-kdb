@@ -25,3 +25,6 @@ Thumbs.db
 q/tick.q
 q/tick/u.q
 q/tick/r.q
+
+# public-demo bundles (uploaded to the Hugging Face Space, not committed)
+demo/

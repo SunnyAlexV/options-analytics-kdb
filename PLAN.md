@@ -102,7 +102,7 @@ These are the pieces that separate a demo from a system a desk would actually ru
 3. **C++ pricing** — Black-76, IV solver, full Greek set, tests ✅ (calc engine wiring into the tickerplant comes with Phase 4)
 4. **Vol surface** — live engine, parity forwards, SVI raw + arbitrage-free, evaluation harness ✅
 5. **Risk** — portfolio Greeks, vega buckets, scenario grid, P&L explain, VaR/ES with backtest ✅ (smile-rule verdict: pending a 4-hour live run, `scripts/eval_smile_rules.py`)
-6. **Dashboard**
+6. **Dashboard** — Dash + Plotly, Market / Risk / System pages over the gateway; public-demo build ready (deploy after the 4-hour run) ✅
 7. **Polish** — benchmarks, CI, README, design document, demo video
 8. **Multi-asset** — see below
 
@@ -112,8 +112,22 @@ These are the pieces that separate a demo from a system a desk would actually ru
   - an `asset` column and an instrument reference table in every q schema
   - a pricer interface where the pricing model is a choice, not hard-coded
   - feed handlers that all output the same normalised row format
-- **Candidates:**
-  - ETH options (same feed)
-  - US equity and ETF options via yfinance snapshots: American exercise means a binomial or finite-difference pricer, plus dividends and interest rates
-  - index options (European, Black-Scholes with a dividend yield)
-- **Constraint:** free options data outside crypto is limited and delayed. Choose sources when this phase starts.
+- **Scope (agreed 9 Oct 2026): crypto, US, India, UK.** Asia excluded.
+
+| Market | Instruments | Data route (non-professional prices, Oct 2026) |
+|---|---|---|
+| Crypto | BTC (done), ETH, Deribit USDC-settled alts (linear) | Deribit websocket, free |
+| US | SPX/SPY index options, single stocks; CME futures options (FX incl. GBP, rates, crude) | Interactive Brokers API: OPRA $1.50/mo, CME $1.25/mo, each waived above $20/mo commissions. ThetaData Standard ($80/mo) later for full SPX chains |
+| India | NSE Nifty and Bank Nifty options (European, cash-settled, weekly expiries) | Upstox market-data websocket (free) or Zerodha Kite Connect (Rs 500/mo) |
+| UK | FTSE 100 index options (ICE Futures Europe); GBP via CME FX options | Live FTSE is expensive (ICE Financials ~$122/mo via IB): start with ICE end-of-day settlements (to confirm) + CME GBP options live |
+
+- **New per market:** a conventions module (exercise style, settlement, calendar and sessions, day count,
+  quote currency, lot size), a rate curve (SOFR / Indian T-bills / SONIA), dividends implied from
+  put-call parity (the forward regression already estimates F and D), an American-exercise pricer in C++
+  (US single stocks, SPY), and a trading-day vol clock for exchange-traded markets.
+- **Cross-asset:** books valued in USD with live FX; joint VaR on the same historical days for every
+  asset (correlations kept); an asset selector on the dashboard.
+- **Licensing:** paid exchange data cannot be shown publicly in real time. The public demo replays
+  crypto live-recorded data, and for licensed markets only delayed recordings or derived numbers,
+  per each source's terms.
+- **Order:** ETH -> India (Nifty) -> US (SPX/SPY, then single stocks, then CME futures options) -> UK.

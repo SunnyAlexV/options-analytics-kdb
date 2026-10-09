@@ -6,7 +6,7 @@ A live options analytics system for BTC options on Deribit. It is built the way 
 - **C++** for pricing, implied vol and calibration
 - **Python** for the data feed, orchestration and the dashboard
 
-> **Status:** Phases 0–5 complete (feed, kdb+ core, C++ pricing, live vol surface, portfolio risk); Phase 6 (dashboard) next. See [PLAN.md](PLAN.md) for the full design and roadmap.
+> **Status:** Phases 0–6 complete (feed, kdb+ core, C++ pricing, live vol surface, portfolio risk, dashboard); Phase 7 (polish) next. See [PLAN.md](PLAN.md) for the full design and roadmap.
 
 ## Architecture
 
@@ -40,7 +40,8 @@ Runs on Linux, or on Windows through WSL. See [SETUP.md](SETUP.md).
 ```bash
 bash scripts/get_kdb_tick.sh     # once: fetch KX's kdb+tick (pinned, hash-checked)
 pip install -e .                 # compile the C++ pricing library into the `pricing` package
-bash scripts/start.sh            # tickerplant, HDB, RDB, gateway, live feed, surface engine, risk
+bash scripts/start.sh            # tickerplant, HDB, RDB, gateway, live feed, surface engine, risk, dashboard
+# then open http://localhost:8050
 bash scripts/status.sh
 bash scripts/stop.sh
 python scripts/system_test.py    # end-to-end test on a throwaway copy of the system
@@ -90,6 +91,39 @@ A second real-time process takes the fitted smiles and, for a book of positions,
 **How the smile moves when BTC moves** decides every delta. One parameter, Bergomi's skew-stickiness ratio R, covers sticky-strike (R = 1), sticky-moneyness (R = 0) and everything between. R is **measured from recorded data** and the rules are scored by which one hedges better out of sample, under a decision rule fixed before the data was seen. Run `python scripts/eval_smile_rules.py --gw 5013 --start <date> --report` after a few hours of live data; it writes `results/phase5_smile_rules.md`.
 
 Details are in [lessons/06](lessons/06-risk.md).
+
+## Dashboard (Phase 6)
+
+A dark trading-desk dashboard (Dash + Plotly), refreshed every 2 seconds through the kdb+ gateway. Summaries are computed in q, next to the data; only small results travel.
+
+- **Market:**
+  - live smiles with bid–ask bars against raw and arbitrage-free SVI and Deribit's marks;
+  - the implied distribution of BTC at expiry;
+  - a 3D surface in standardised moneyness;
+  - ATM, skew and wing term structures;
+  - our own 30-day constant-maturity ATM vol;
+  - an option chain marking each quote rich or cheap against the fitted smile;
+  - forwards, carry and the BTC rate implied by put-call parity;
+  - 5 years of the variance risk premium;
+  - open interest, flow and the trade tape.
+- **Risk:**
+  - the scenario heatmap;
+  - the P&L-explain waterfall;
+  - vega buckets;
+  - Greeks and P&L through the day;
+  - positions with live Greeks;
+  - VaR/ES with the backtest.
+- **System:**
+  - throughput;
+  - latency at each hop;
+  - data quality;
+  - fit quality per expiry;
+  - feed outages.
+
+![Market page](docs/img/dashboard-market.jpg)
+![Risk page](docs/img/dashboard-risk.jpg)
+
+A **public demo** replays a recorded session through the same app on a Hugging Face Space, with no kdb+ or C++ needed (`scripts/make_demo_bundle.py`, `scripts/deploy_demo.py`). Details: [lessons/07](lessons/07-dashboard.md).
 
 ## Credits and licences
 

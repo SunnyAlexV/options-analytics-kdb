@@ -16,7 +16,9 @@ Checks:
      both stream mode (tickerplant subscription) and poll mode (RDB reads).
   6. Risk (Phase 5): positions, risk by bucket, the scenario grid, P&L explain
      and VaR/ES are published, with basic sanity checks on each.
-  7. End of day: force one, and today's rows move to the HDB intact while
+  7. Dashboard (Phase 6): every view's q query runs cleanly on the gateway, the
+     key views return data, and the web page is served.
+  8. End of day: force one, and today's rows move to the HDB intact while
      the RDB empties.
 """
 import os
@@ -33,7 +35,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from feed.schema import SCHEMAS  # noqa: E402
 
-ENV = dict(os.environ, ENGINE_MODE="stream", RISK_PNL_EVERY="20", DATA=str(Path.home() / "kdbdata-test"),
+ENV = dict(os.environ, ENGINE_MODE="stream", RISK_PNL_EVERY="20", DASH_PORT="6050", DATA=str(Path.home() / "kdbdata-test"),
            TP_PORT="6010", RDB_PORT="6011", HDB_PORT="6012", GW_PORT="6013",
            PY=sys.executable)
 PORT = {"tp": 6010, "rdb": 6011, "hdb": 6012, "gw": 6013}
@@ -55,7 +57,7 @@ def check(ok: bool, what: str) -> None:
 
 
 def show_logs(lines: int = 15) -> None:
-    for name in ("tp", "hdb", "rdb", "gw", "feed", "engine", "risk"):
+    for name in ("tp", "hdb", "rdb", "gw", "feed", "engine", "risk", "dash"):
         f = Path(ENV["DATA"]) / "logs" / f"{name}.log"
         if f.exists():
             print(f"----- {name}.log -----")
@@ -72,7 +74,7 @@ def main() -> int:
     if data.exists():
         shutil.rmtree(data)
 
-    print("\n[1] start everything (incl. the surface engine and risk) and run for 60 s")
+    print("\n[1] start everything (incl. surface engine, risk and dashboard) and run for 60 s")
     sh("start.sh")
     time.sleep(60)
 
@@ -130,8 +132,22 @@ def main() -> int:
         print(f"  INFO  VaR 99% (FHS) {v['var99']:,.0f} USD, backtest Kupiec p = {v['kupiec']:.2f}")
     check(c1.get("vares", 0) == 2, f"VaR / ES published for HS and FHS ({c1.get('vares', 0)} rows)")
 
-    print("\n[3] crash recovery: stop the feed, engine and risk, kill the RDB, restart it")
-    sh("stop.sh", "risk", "engine", "feed")
+    print("\n[2d] dashboard: every view's q query on the live gateway, and the web page")
+    from dashboard.sources import Q, GatewaySource
+    v = GatewaySource(PORT["gw"]).views(list(Q))
+    errs = v.get("_errors", [])
+    check(not errs, f"all {len(Q)} dashboard views query cleanly" + (f": {errs[:3]}" if errs else ""))
+    for name in ("latest_iv", "latest_surface", "spot1m", "surf1m", "risk_last", "scen_last", "dq"):
+        check(len(v.get(name, [])) > 0, f"view {name} has data ({len(v.get(name, []))} rows)")
+    import urllib.request
+    try:
+        code = urllib.request.urlopen("http://127.0.0.1:6050/", timeout=10).status
+    except Exception as e:
+        code = f"{type(e).__name__}"
+    check(code == 200, f"dashboard serves its page on port 6050 (HTTP {code})")
+
+    print("\n[3] crash recovery: stop the dashboard, feed, engine and risk, kill the RDB, restart it")
+    sh("stop.sh", "dash", "risk", "engine", "feed")
     time.sleep(2)
     before = counts()
     sh("stop.sh", "rdb")

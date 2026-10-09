@@ -45,4 +45,12 @@ args:.z.x,(count .z.x)_(":5011";":5012");
 / latest[table]: most recent row per sym, today
 .gw.latest:{[t] .gw.conn[`rdb]({select by sym from value x};t)};
 
+/ rdbq / hdbq: run a prepared query (a string) on the RDB or HDB. The dashboard
+/ (dashboard/sources.py) sends its queries this way, so summaries such as a
+/ median per minute are computed in q, next to the data, and only small results
+/ travel back. This runs any q expression: fine on this machine, but a shared
+/ gateway would restrict it to a list of named queries.
+.gw.rdbq:{[q] .gw.conn[`rdb] q};
+.gw.hdbq:{[q] .gw.conn[`hdb] q};
+
 -1"Gateway ready: rdb ",string[.gw.addr`rdb],", hdb ",string .gw.addr`hdb;

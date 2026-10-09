@@ -6,7 +6,7 @@ set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 source "$ROOT/config.env"
 
-parts=("$@"); [ ${#parts[@]} -eq 0 ] && parts=(risk engine feed gw rdb hdb tp)
+parts=("$@"); [ ${#parts[@]} -eq 0 ] && parts=(dash risk engine feed gw rdb hdb tp)
 for p in "${parts[@]}"; do
   f="$RUN/$p.pid"
   if [ -f "$f" ] && kill -0 "$(cat "$f")" 2>/dev/null; then
