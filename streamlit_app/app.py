@@ -7,8 +7,9 @@ for people without kdb+: the same bundle replay (dashboard/sources.py ReplaySour
 calculations (dashboard/analytics.py) and the same charts (dashboard/figures.py), so every
 number matches what the live dashboard showed. Only the page layout is Streamlit's.
 
-The replay clock runs at 10x real time and loops; everyone watching sees the same moment, like
-a live market. "Pause at a moment" freezes the page at any minute of the session instead.
+Two recorded sessions (real Deribit data, 9 Oct 2026): all nine coins for 25 minutes, and BTC alone
+for 4 hours (the run that decided the smile rule). The replay clock loops; everyone watching sees
+the same moment, like a live market. Switching "Live replay" off freezes the page at any minute.
 """
 from __future__ import annotations
 
@@ -29,8 +30,12 @@ from dashboard import tables as TB  # noqa: E402
 from dashboard import theme as th  # noqa: E402
 from dashboard.sources import ReplaySource, assets_in, for_asset  # noqa: E402
 
-BUNDLE = Path(__file__).resolve().parent / "bundle"
-SPEED = 10.0
+HERE = Path(__file__).resolve().parent
+# label -> (bundle folder, replay speed, warm-up minutes skipped at the start)
+SESSIONS = {
+    "All 9 coins · 25 min": (HERE / "bundle_all", 2.0, 3.0),
+    "BTC · 4 hours": (HERE / "bundle", 10.0, 10.0),
+}
 REFRESH_S = 3
 MARKET_VIEWS = ["latest_surface", "latest_iv", "latest_ref", "latest_snap", "latest_quote", "latest_fwd",
                 "spot1m", "surf1m", "trades"]
@@ -43,20 +48,25 @@ st.set_page_config(page_title="Crypto options desk", page_icon="📈", layout="w
 
 # --------------------------------------------------------------------------- data (once per server)
 @st.cache_resource(show_spinner="Loading the recorded session…")
+def load_source(session: str) -> ReplaySource:
+    folder, speed, warm = SESSIONS[session]
+    return ReplaySource(folder, speed=speed, warmup_min=warm)
+
+
 def source() -> ReplaySource:
-    return ReplaySource(BUNDLE, speed=SPEED)
+    return load_source(st.session_state.get("session", next(iter(SESSIONS))))
 
 
 @st.cache_resource
 def vrp_frame() -> pd.DataFrame:
-    f = BUNDLE / "history.csv"
+    f = SESSIONS["BTC · 4 hours"][0] / "history.csv"            # BTC index + DVOL, 5 years
     return A.vrp_history(pd.read_csv(f, parse_dates=["date"])) if f.exists() else pd.DataFrame()
 
 
 @st.cache_resource
-def minutes() -> list[pd.Timestamp]:
+def minutes(session: str) -> list[pd.Timestamp]:
     """Every minute of the session after the warm-up (the replay starts there too)."""
-    s = source()
+    s = load_source(session)
     return list(pd.date_range((s.t_start + s.warm).ceil("1min"), s.t_end.floor("1min"), freq="1min"))
 
 
@@ -267,22 +277,26 @@ def system_page(now, key):
 
 # --------------------------------------------------------------------------- layout
 st.markdown(CSS, unsafe_allow_html=True)
+head = st.columns([3, 2, 2, 3, 2], vertical_alignment="bottom")
+with head[1]:
+    session = st.selectbox("Session", list(SESSIONS), key="session", label_visibility="collapsed",
+                           help="Recorded live from Deribit on 9 Oct 2026")
 s = source()
-head = st.columns([3, 2, 3, 3], vertical_alignment="bottom")
+speed = SESSIONS[session][1]
 with head[0]:
     st.markdown(f'<div style="font-size:24px;font-weight:600;color:{th.INK}">Crypto options desk</div>',
                 unsafe_allow_html=True)
     st.markdown(f'<span class="meta">Replay of a live session recorded from Deribit by '
                 f'<a href="{REPO}">this kdb+ / C++ / Python system</a></span>', unsafe_allow_html=True)
-with head[2]:
+with head[3]:
     page = st.segmented_control("Page", ["Market", "Risk", "System"], default="Market", required=True,
                                 key="page", label_visibility="collapsed")
-with head[3]:
-    live = st.toggle(f"Live replay ({SPEED:g}× speed)", value=True, key="live",
+with head[4]:
+    live = st.toggle(f"Live replay ({speed:g}×)", value=True, key="live",
                      help="Off: pause the replay and pick any minute of the session.")
 
 assets = assets_in(s.views(["latest_surface"], s.t_end)) or ["BTC"]
-with head[1]:
+with head[2]:
     asset = st.selectbox("Asset", assets, key="asset", label_visibility="collapsed")
 
 if live:
@@ -293,7 +307,7 @@ if live:
                     f'{REFRESH_S} s</span>', unsafe_allow_html=True)
         render(now, "live")
 else:
-    mins = minutes()
+    mins = minutes(session)
     moment = st.select_slider("Moment of the session (UTC)", options=mins, value=mins[len(mins) // 2],
                               format_func=lambda t: f"{t:%H:%M}", key="moment")
 
