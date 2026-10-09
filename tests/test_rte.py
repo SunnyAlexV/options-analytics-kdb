@@ -34,7 +34,15 @@ def frames(now_ns):
 
 
 def start(runner, mode):
-    t = threading.Thread(target=runner.run_stream if mode == "stream" else runner.run_poll, daemon=True)
+    run = runner.run_stream if mode == "stream" else runner.run_poll
+
+    def target():
+        try:
+            run()
+        except (ConnectionError, RuntimeError):   # the fake servers stop at the end of each test
+            pass
+
+    t = threading.Thread(target=target, daemon=True)
     t.start()
     return t
 

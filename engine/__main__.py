@@ -115,27 +115,33 @@ class Runner:
     # ------------------------------------------------------------ stream mode
     def run_stream(self):
         conn, loop = open_subscriber(self.args.tp_port)
-        # ONE call subscribes to all three tables. PyKX's raw connection treats every incoming
-        # message as the reply to the oldest pending call while any call is pending, so a live
-        # upd arriving between several .u.sub replies would be mistaken for a reply. The
-        # tickerplant is single-threaded: it finishes this call, and replies, before it
-        # publishes anything to us, so nothing can interleave.
-        tabs = "".join("`" + t for t in TABLES)
-        # The call returns an asyncio Task (wrapping PyKX's QFuture), which only advances while
-        # the event loop runs it: run it here, with a timeout, and it reads its own reply.
-        reply = conn(f".u.sub[;`] each {tabs}")
-        conn.poll_send(0)
-        loop.run_until_complete(asyncio.wait_for(reply, timeout=15))   # raises if it failed
-        print("Engine: subscribed to " + ", ".join(TABLES), flush=True)
-        self.bootstrap()
-        while True:
-            msg = conn.poll_recv()                        # no pending calls now: returns each upd
-            if msg is None:
+        try:
+            # ONE call subscribes to all three tables. PyKX's raw connection treats every incoming
+            # message as the reply to the oldest pending call while any call is pending, so a live
+            # upd arriving between several .u.sub replies would be mistaken for a reply. The
+            # tickerplant is single-threaded: it finishes this call, and replies, before it
+            # publishes anything to us, so nothing can interleave.
+            tabs = "".join("`" + t for t in TABLES)
+            # The call returns an asyncio Task (wrapping PyKX's QFuture), which only advances while
+            # the event loop runs it: run it here, with a timeout, and it reads its own reply.
+            reply = conn(f".u.sub[;`] each {tabs}")
+            conn.poll_send(0)
+            loop.run_until_complete(asyncio.wait_for(reply, timeout=15))   # raises if it failed
+            print("Engine: subscribed to " + ", ".join(TABLES), flush=True)
+            self.bootstrap()
+            while True:
+                msg = conn.poll_recv()                        # no pending calls now: returns each upd
+                if msg is None:
+                    self.tick()
+                    time.sleep(0.002)
+                    continue
+                self._dispatch(msg)
                 self.tick()
-                time.sleep(0.002)
-                continue
-            self._dispatch(msg)
-            self.tick()
+        finally:
+            try:
+                loop.run_until_complete(conn.close())     # PyKX closes raw connections asynchronously
+            except Exception:
+                pass
 
     # Unlicensed PyKX cannot index into q objects (msg[0] raises a licence error), but it
     # can iterate over them: list(msg) gives the elements as q objects, which convert fine.

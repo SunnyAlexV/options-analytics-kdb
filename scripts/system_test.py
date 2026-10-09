@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from feed.schema import SCHEMAS  # noqa: E402
 
-ENV = dict(os.environ, DATA=str(Path.home() / "kdbdata-test"),
+ENV = dict(os.environ, ENGINE_MODE="stream", DATA=str(Path.home() / "kdbdata-test"),
            TP_PORT="6010", RDB_PORT="6011", HDB_PORT="6012", GW_PORT="6013",
            PY=sys.executable)
 PORT = {"tp": 6010, "rdb": 6011, "hdb": 6012, "gw": 6013}
@@ -90,7 +90,7 @@ def main() -> int:
                    "where (`timespan$recv)>0D00:00:01")
     print(f"  INFO  median feed -> tickerplant delay: {lag:.2f} ms")
 
-    print(f"\n[2b] surface engine ({ENV.get('ENGINE_MODE', 'poll')} mode)")
+    print(f"\n[2b] surface engine ({ENV['ENGINE_MODE']} mode)")
     check(c1.get("iv", 0) > 1000, f"implied vols published ({c1.get('iv', 0):,} rows)")
     check(c1.get("surface", 0) >= 10, f"smiles fitted ({c1.get('surface', 0)} surface rows)")
     check(c1.get("fwd", 0) >= 10, f"parity forwards estimated ({c1.get('fwd', 0)} rows)")
