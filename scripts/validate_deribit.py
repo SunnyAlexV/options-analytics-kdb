@@ -35,7 +35,7 @@ def from_rest(currency="BTC"):
 def from_gateway(port):
     os.environ.setdefault("PYKX_UNLICENSED", "true")
     import pykx as kx
-    with kx.SyncQConnection(port=port) as c:
+    with kx.SyncQConnection(port=port, no_ctx=True) as c:
         t = c("{0!.gw.latest[`snap]}", None).pd()
     return {"sym": list(t["sym"]), "t": t["exch"].astype("int64").to_numpy(dtype=float),
             "und": t["und"].to_numpy(float), "mark": t["mark"].to_numpy(float),

@@ -1,7 +1,7 @@
 """End-to-end test of the whole system: feed -> tickerplant -> RDB -> HDB -> gateway.
 
 Runs a separate, throwaway copy of the system (ports 6010-6013, data in
-~/kdbdata-test), so it never touches your real data. Takes about 3 minutes.
+~/kdbdata-test), so it never touches your real data. Takes about 4 minutes.
 
     python scripts/system_test.py
 
@@ -12,7 +12,9 @@ Checks:
   3. Crash recovery: kill the RDB, restart it, and it rebuilds exactly the
      same rows from the tickerplant log.
   4. The gateway returns the same rows as the RDB.
-  5. End of day: force one, and today's rows move to the HDB intact while
+  5. The surface engine publishes implied vols, forwards and fitted smiles, in
+     both stream mode (tickerplant subscription) and poll mode (RDB reads).
+  6. End of day: force one, and today's rows move to the HDB intact while
      the RDB empties.
 """
 import os
@@ -41,7 +43,7 @@ def sh(*args: str) -> None:
 
 
 def q(proc: str, expr: str, *args):
-    with kx.SyncQConnection(port=PORT[proc]) as c:
+    with kx.SyncQConnection(port=PORT[proc], no_ctx=True) as c:
         return c(expr, *args).py()
 
 
@@ -51,7 +53,7 @@ def check(ok: bool, what: str) -> None:
 
 
 def show_logs(lines: int = 15) -> None:
-    for name in ("tp", "hdb", "rdb", "gw", "feed"):
+    for name in ("tp", "hdb", "rdb", "gw", "feed", "engine"):
         f = Path(ENV["DATA"]) / "logs" / f"{name}.log"
         if f.exists():
             print(f"----- {name}.log -----")
@@ -68,7 +70,7 @@ def main() -> int:
     if data.exists():
         shutil.rmtree(data)
 
-    print("\n[1] start everything and let the feed run for 60 s")
+    print("\n[1] start everything (incl. the surface engine) and run for 60 s")
     sh("start.sh")
     time.sleep(60)
 
@@ -88,8 +90,24 @@ def main() -> int:
                    "where (`timespan$recv)>0D00:00:01")
     print(f"  INFO  median feed -> tickerplant delay: {lag:.2f} ms")
 
-    print("\n[3] crash recovery: stop the feed, kill the RDB, restart it")
-    sh("stop.sh", "feed")
+    print(f"\n[2b] surface engine ({ENV.get('ENGINE_MODE', 'poll')} mode)")
+    check(c1.get("iv", 0) > 1000, f"implied vols published ({c1.get('iv', 0):,} rows)")
+    check(c1.get("surface", 0) >= 10, f"smiles fitted ({c1.get('surface', 0)} surface rows)")
+    check(c1.get("fwd", 0) >= 10, f"parity forwards estimated ({c1.get('fwd', 0)} rows)")
+    if c1.get("iv", 0):
+        med_iv = q("rdb", "exec med midiv from iv where not null midiv")
+        check(0.1 < med_iv < 2.0, f"median mid implied vol plausible ({med_iv:.1%})")
+    if c1.get("surface", 0):
+        inb = q("rdb", "exec med inband from select by sym from surface")
+        check(inb > 0.5, f"smiles inside the bid-ask band (median {inb:.0%} of points)")
+        neg = q("rdb", "exec sum afming<0 from select by sym from surface")
+        check(neg == 0, "arbitrage-free smiles have no negative density")
+    if c1.get("fwd", 0):
+        dd = q("rdb", "exec med abs diff from select by sym from fwd where not null diff")
+        print(f"  INFO  median |parity forward - Deribit forward|: {dd:.2f} USD")
+
+    print("\n[3] crash recovery: stop the feed and engine, kill the RDB, restart it")
+    sh("stop.sh", "engine", "feed")
     time.sleep(2)
     before = counts()
     sh("stop.sh", "rdb")
@@ -98,19 +116,31 @@ def main() -> int:
     after = counts()
     check(after == before, f"RDB rebuilt every row from the tickerplant log ({sum(before.values()):,} rows)")
 
-    print("\n[4] gateway")
+    print("\n[4] surface engine, poll mode (reads new RDB rows)")
+    ENV["ENGINE_MODE"] = "poll"
+    sh("start.sh", "feed", "engine")
+    time.sleep(25)
+    sh("stop.sh", "engine", "feed")
+    time.sleep(2)
+    now = counts()
+    check(now["iv"] - before["iv"] > 500, f"poll mode published implied vols ({now['iv'] - before['iv']:,} new rows)")
+    before = now
+
+    print("\n[5] gateway")
     gq = q("gw", "{count .gw.get[`quote;.z.D;.z.D;`]}", None)
     check(gq == before["quote"], f"gateway returns all of today's quotes ({gq:,})")
     nsym = q("rdb", "count distinct quote`sym")
     latest = q("gw", "{count .gw.latest[`quote]}", None)
     check(latest == nsym, f"gateway latest quote per instrument ({latest} instruments)")
 
-    print("\n[5] end of day")
+    print("\n[6] end of day")
     day = q("rdb", ".z.D")
     q("tp", ".u.endofday[]")
     time.sleep(5)
     hdb_quotes = q("hdb", "{count select from quote where date=x}", day)
     check(hdb_quotes == before["quote"], f"HDB holds {hdb_quotes:,} quotes for {day}")
+    hdb_surf = q("hdb", "{count select from surface where date=x}", day)
+    check(hdb_surf == before["surface"], f"HDB holds {hdb_surf:,} surface rows for {day}")
     check(sum(counts().values()) == 0, "RDB empty after end of day")
     check((data / "hdb" / str(day).replace("-", ".") / "quote").is_dir(), "date folder written to disk")
 

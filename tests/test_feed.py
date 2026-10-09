@@ -154,7 +154,23 @@ def sample_rows():
         "ref": N.instruments_to_ref(FIX["instruments"]),
         "dq": [m.row()],
         "gap": [{"sym": "BTC", "asset": "BTC", "start": RECV, "end": RECV + 5, "reason": "silent"}],
+        **engine_rows(),
     }
+
+
+def engine_rows():
+    """iv / fwd / surface rows from a run of the surface engine on a synthetic market."""
+    pytest.importorskip("pricing", reason="build the C++ module first: pip install -e .")
+    from engine.core import SurfaceEngine
+    from tests.test_engine import synthetic_market
+    now = 1_791_500_000 * 1_000_000_000
+    ref, snap, quotes, _ = synthetic_market(now)
+    eng = SurfaceEngine()
+    eng.on_ref(ref)
+    eng.on_snap(snap)
+    ivs = eng.on_quotes(quotes)
+    fwd, surf = eng.refit(now, force=True)
+    return {"iv": ivs, "fwd": fwd, "surface": surf}
 
 
 def test_every_table_converts_to_correctly_typed_q_columns():

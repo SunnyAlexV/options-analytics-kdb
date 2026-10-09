@@ -6,7 +6,7 @@ A live options analytics system for BTC options on Deribit. It is built the way 
 - **C++** for pricing, implied vol and calibration
 - **Python** for the data feed, orchestration and the dashboard
 
-> **Status:** Phases 0–3 complete (feed, kdb+ core, C++ pricing); Phase 4 (vol surface) next. See [PLAN.md](PLAN.md) for the full design and roadmap.
+> **Status:** Phases 0–4 complete (feed, kdb+ core, C++ pricing, live vol surface); Phase 5 (risk and P&L explain) next. See [PLAN.md](PLAN.md) for the full design and roadmap.
 
 ## Architecture
 
@@ -38,13 +38,14 @@ Runs on Linux, or on Windows through WSL. See [SETUP.md](SETUP.md).
 ```bash
 bash scripts/get_kdb_tick.sh     # once: fetch KX's kdb+tick (pinned, hash-checked)
 pip install -e .                 # compile the C++ pricing library into the `pricing` package
-bash scripts/start.sh            # tickerplant, HDB, RDB, gateway, live feed
+bash scripts/start.sh            # tickerplant, HDB, RDB, gateway, live feed, surface engine
 bash scripts/status.sh
 bash scripts/stop.sh
 python scripts/system_test.py    # end-to-end test on a throwaway copy of the system
 pytest                           # unit tests (Python)
 python scripts/validate_deribit.py   # our implied vols vs Deribit's mark IVs, live
 python scripts/bench_iv.py           # C++ vs Python timings
+python scripts/eval_surface.py --recording ~/kdbdata/raw   # score surface design choices
 ```
 
 ## Pricing library (C++, Phase 3)
@@ -60,6 +61,18 @@ On 1,000 options:
 | Implied vol, per option | ~0.6 µs | ~3,900 µs |
 
 Against Deribit's own marks, our implied vols match `mark_iv` to a median of about 1 bp on well-conditioned options. Deribit rounds `mark_iv` to 1 bp.
+
+## Live volatility surface (Phase 4)
+
+A streaming real-time engine subscribes to the tickerplant. For every quote it computes bid, ask and mid implied vols. For each expiry it estimates the forward **and the BTC discount factor** from put-call parity across the whole chain. It then fits **two SVI smiles** per expiry (raw, and arbitrage-free under butterfly, calendar and Lee constraints) and publishes everything back through the tickerplant.
+
+**Design choices are decided by an evaluation harness**, not by assumption: each configuration predicts the next 10 seconds of quotes out of sample, and is checked on two separate halves of the data.
+
+- **Parity forward:** beat Deribit's own forward by ~11% (adopted).
+- **Quote-size weights:** no consistent gain (rejected).
+- **The final surface:** ties Deribit's own marks in one half and trails them by ~9% in the other, built from public top-of-book quotes alone.
+
+Details are in [results/phase4_harness.md](results/phase4_harness.md) and [lessons/05](lessons/05-surface-engine.md).
 
 ## Credits and licences
 

@@ -4,13 +4,17 @@
 // same length n and we simply loop. One call prices a whole option chain.
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 
 #include <cstdint>
 #include <initializer_list>
+#include <optional>
+#include <vector>
 #include <stdexcept>
 #include <string>
 
 #include "oak/black76.hpp"
+#include "oak/svi.hpp"
 
 namespace py = pybind11;
 using Arr = py::array_t<double, py::array::c_style | py::array::forcecast>;
@@ -87,4 +91,57 @@ PYBIND11_MODULE(_core, m) {
         for (int j = 0; j < kN; ++j) d[names[j]] = cols[j];
         return d;
     });
+
+    // ------------------------------------------------------------------ SVI
+    auto to_svi = [](const std::vector<double>& v) {
+        if (v.size() != 5) throw std::invalid_argument("SVI parameters must be [a, b, rho, m, sigma]");
+        return oak::SVI{v[0], v[1], v[2], v[3], v[4]};
+    };
+
+    m.def("svi_w", [to_svi](const std::vector<double>& p, Arr k) {
+        const auto P = to_svi(p);
+        Arr out(k.size());
+        auto kk = k.unchecked<1>(); auto o = out.mutable_unchecked<1>();
+        for (py::ssize_t i = 0; i < k.size(); ++i) o(i) = oak::svi_w(P, kk(i));
+        return out;
+    }, "Total variance w(k) for SVI parameters [a, b, rho, m, sigma]");
+
+    m.def("svi_g", [to_svi](const std::vector<double>& p, Arr k) {
+        const auto P = to_svi(p);
+        Arr out(k.size());
+        auto kk = k.unchecked<1>(); auto o = out.mutable_unchecked<1>();
+        for (py::ssize_t i = 0; i < k.size(); ++i) o(i) = oak::svi_g(P, kk(i));
+        return out;
+    }, "Gatheral's density function g(k); negative values mean butterfly arbitrage");
+
+    m.def("fit_svi", [to_svi](Arr k, Arr iv, Arr hs, Arr wt, double T, bool arb_free,
+                              std::optional<std::vector<double>> prev,
+                              std::optional<std::vector<double>> init, double hs_floor) {
+        const auto n = common_len({k.size(), iv.size(), hs.size(), wt.size()});
+        oak::Slice s;
+        s.T = T;
+        s.k.assign(k.data(), k.data() + n);
+        s.iv.assign(iv.data(), iv.data() + n);
+        s.hs.assign(hs.data(), hs.data() + n);
+        s.wt.assign(wt.data(), wt.data() + n);
+        oak::FitConfig cfg;
+        cfg.arb_free = arb_free;
+        cfg.hs_floor = hs_floor;
+        oak::SVI prev_p{}, init_p{};
+        if (prev) { prev_p = to_svi(*prev); cfg.prev = &prev_p; }
+        if (init) init_p = to_svi(*init);
+        oak::FitResult r;
+        {
+            py::gil_scoped_release nogil;
+            r = oak::svi_fit(s, cfg, init ? &init_p : nullptr);
+        }
+        py::dict d;
+        d["a"] = r.p.a; d["b"] = r.p.b; d["rho"] = r.p.rho; d["m"] = r.p.m; d["sigma"] = r.p.sigma;
+        d["cost"] = r.cost; d["rmse_vol"] = r.rmse_vol; d["wrmse"] = r.wrmse;
+        d["inside_band"] = r.inside_band; d["min_g"] = r.min_g; d["max_cal"] = r.max_cal;
+        d["lee"] = r.lee; d["iterations"] = r.iterations; d["ok"] = r.ok;
+        return d;
+    }, py::arg("k"), py::arg("iv"), py::arg("hs"), py::arg("wt"), py::arg("T"),
+       py::arg("arb_free") = false, py::arg("prev") = py::none(), py::arg("init") = py::none(),
+       py::arg("hs_floor") = 0.0025);
 }

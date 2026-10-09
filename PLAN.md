@@ -53,6 +53,10 @@ These are the pieces that separate a demo from a system a desk would actually ru
 | Build | scikit-build-core + CMake + pybind11 (`pip install -e .`); C++ tests with GoogleTest | — |
 | IVs computed | Bid, ask and mid IV for every option (the bid-ask IV width becomes the SVI fit weight in Phase 4) | — |
 | BTC premium convention | V_btc = Black76(F)/F, i.e. zero BTC discount rate, as Deribit does (derived in lessons/04) | — |
+| Surface engine | Streaming kdb+ real-time engine (tickerplant subscriber); poll mode as a lossless fallback; IV per quote, smile refit per changed expiry at most every 0.5 s (harness: 0.1 s no better, 2 s worse) | — |
+| Forward | Put-call parity regression across all strikes (gives F and the BTC discount factor D); Deribit's forward as fallback when the regression's std error exceeds 0.1% of F (harness: ~11% better out of sample) | Futures as a third source |
+| Smile fit | SVI, Zeliade quasi-explicit (exact inner QP) + Levenberg-Marquardt, weights 1/half-spread², best side per strike; quote-size weights rejected by the harness | SSVI across expiries |
+| Arbitrage | Raw and arbitrage-free fits both published; butterfly (g ≥ 0), calendar and Lee constraints via penalty continuation with safety margins | SSVI (arbitrage-free by construction) |
 | Repo licence | MIT (the KDB-X licence forbids linking with copyleft code) | — |
 | Benchmarks | Publish C++ vs Python timings only; no published timings that involve q unless KX approves in writing | — |
 | CI | GitHub Actions runs the C++ and Python tests; q tests run locally | — |
@@ -96,7 +100,7 @@ These are the pieces that separate a demo from a system a desk would actually ru
 1. **Data** — feed handler ✅
 2. **kdb+ core** — tickerplant, real-time DB, historical DB ✅
 3. **C++ pricing** — Black-76, IV solver, full Greek set, tests ✅ (calc engine wiring into the tickerplant comes with Phase 4)
-4. **Vol surface** — SVI calibration and arbitrage checks
+4. **Vol surface** — live engine, parity forwards, SVI raw + arbitrage-free, evaluation harness ✅
 5. **Risk** — portfolio Greeks, scenarios, P&L explain, VaR
 6. **Dashboard**
 7. **Polish** — benchmarks, CI, README, design document, demo video

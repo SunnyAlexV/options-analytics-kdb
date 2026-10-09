@@ -73,7 +73,7 @@ class TickerplantSink:
             return False
         self.next_try = time.monotonic() + 2.0
         try:
-            self.conn = self.kx.SyncQConnection(host=self.host, port=self.port)
+            self.conn = self.kx.SyncQConnection(host=self.host, port=self.port, no_ctx=True)
             print(f"TickerplantSink: connected to {self.host}:{self.port}")
             self.warned = False
             return True
@@ -149,10 +149,13 @@ def to_q_columns(kx, table: str, rows: list[dict]) -> list:
 class FileSink:
     """Appends rows to ``<root>/<YYYY.MM.DD>/<table>.jsonl.gz``, one file per table per UTC day."""
 
+    FLUSH_S = 5.0   # flush to disk this often: recordings are readable while the feed runs, and survive crashes
+
     def __init__(self, root: Path):
         self.root = Path(root).expanduser()
         self.files: dict[tuple[str, str], gzip.GzipFile] = {}
         self.counts: Counter = Counter()
+        self.last_flush = time.monotonic()
 
     def _file(self, table: str):
         day = dt.datetime.now(dt.timezone.utc).strftime("%Y.%m.%d")
@@ -170,6 +173,10 @@ class FileSink:
         for r in rows:
             f.write(json.dumps(r, separators=(",", ":")) + "\n")
         self.counts[table] += len(rows)
+        if time.monotonic() - self.last_flush >= self.FLUSH_S:
+            for fh in self.files.values():
+                fh.flush()            # gzip sync-flush: everything so far becomes readable
+            self.last_flush = time.monotonic()
 
     def close(self) -> None:
         for f in self.files.values():

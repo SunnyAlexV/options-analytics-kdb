@@ -30,7 +30,7 @@ symbol, or that file grows without limit. That is why ``tradeid`` is a long.
 
 TP_COLS = [("time", "n")]          # added by the tickerplant, never sent by the feed
 
-# Columns the feed sends, in order (``sym`` always first).
+# Columns each publisher (feed handler or surface engine) sends, in order (``sym`` always first).
 FEED_SCHEMAS: dict[str, list[tuple[str, str]]] = {
     # Top-of-book quote: one row each time the best bid or ask changes.
     "quote": [
@@ -70,6 +70,29 @@ FEED_SCHEMAS: dict[str, list[tuple[str, str]]] = {
     # One row per feed outage (sym = asset).
     "gap": [
         ("sym", "s"), ("asset", "s"), ("start", "p"), ("end", "p"), ("reason", "s"),
+    ],
+    # ---- published by the surface engine (engine/), Phase 4 ----
+    # Implied vols and Greeks, one row per quote update.
+    "iv": [
+        ("sym", "s"), ("asset", "s"), ("exch", "p"), ("F", "f"), ("fsrc", "s"), ("T", "f"),
+        ("bidiv", "f"), ("askiv", "f"), ("midiv", "f"),
+        ("delta", "f"), ("gamma", "f"), ("vega", "f"), ("theta", "f"),
+    ],
+    # Forward per expiry: our put-call-parity regression vs Deribit's (sym = expiry, e.g. BTC-25DEC26).
+    "fwd": [
+        ("sym", "s"), ("asset", "s"), ("expiry", "p"), ("F", "f"), ("D", "f"), ("seF", "f"),
+        ("seD", "f"), ("n", "j"), ("und", "f"), ("undage", "f"), ("diff", "f"),
+        ("Fused", "f"), ("fsrc", "s"),
+    ],
+    # Fitted smile per expiry: raw SVI and arbitrage-free SVI side by side, plus desk metrics.
+    "surface": [
+        ("sym", "s"), ("asset", "s"), ("expiry", "p"), ("T", "f"), ("F", "f"), ("fsrc", "s"),
+        ("n", "j"),
+        ("a", "f"), ("b", "f"), ("rho", "f"), ("m", "f"), ("sigma", "f"),
+        ("rmse", "f"), ("wrmse", "f"), ("inband", "f"), ("ming", "f"), ("calv", "f"),
+        ("afa", "f"), ("afb", "f"), ("afrho", "f"), ("afm", "f"), ("afsigma", "f"),
+        ("afrmse", "f"), ("afinband", "f"), ("afming", "f"), ("afcal", "f"), ("arbgap", "f"),
+        ("atmvol", "f"), ("rr25", "f"), ("bf25", "f"), ("cold", "b"),
     ],
 }
 
