@@ -98,6 +98,13 @@ class FakeTickerplant(FakeServer):
     def on_message(self, conn, msg, msg_type):
         parts = list(msg) if isinstance(msg, kx.List) else [msg]   # unlicensed PyKX: iterate, don't index
         fn = _text(parts[0])
+        if fn.startswith(".u.sub[;`] each "):                # one call subscribing to several tables
+            tabs = [t for t in fn.split("each ", 1)[1].split("`") if t]
+            replies = []
+            for t in tabs:
+                self.subscribers.setdefault(t, []).append(conn)
+                replies.append([kx.SymbolAtom(t), kx.toq(self.schemas[t].iloc[:0])])
+            return replies
         if fn == ".u.sub":                                   # (".u.sub"; `table; `syms)
             t = _text(parts[1])
             self.subscribers.setdefault(t, []).append(conn)

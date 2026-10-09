@@ -59,7 +59,8 @@ def open_subscriber(port: int):
     # thread's current loop (asyncio.run would close it straight after connecting).
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    return loop.run_until_complete(_await(kx.RawQConnection(port=port, no_ctx=True, event_loop=loop)))
+    conn = loop.run_until_complete(_await(kx.RawQConnection(port=port, no_ctx=True, event_loop=loop)))
+    return conn, loop
 
 
 async def _await(x):
@@ -113,27 +114,22 @@ class Runner:
 
     # ------------------------------------------------------------ stream mode
     def run_stream(self):
-        conn = open_subscriber(self.args.tp_port)
-        for t in TABLES:                                  # subscribe: .u.sub[`table; `] = all syms
-            conn(".u.sub", kx.SymbolAtom(t), kx.SymbolAtom(""))
+        conn, loop = open_subscriber(self.args.tp_port)
+        # ONE call subscribes to all three tables. PyKX's raw connection treats every incoming
+        # message as the reply to the oldest pending call while any call is pending, so a live
+        # upd arriving between several .u.sub replies would be mistaken for a reply. The
+        # tickerplant is single-threaded: it finishes this call, and replies, before it
+        # publishes anything to us, so nothing can interleave.
+        tabs = "".join("`" + t for t in TABLES)
+        # The call returns an asyncio Task (wrapping PyKX's QFuture), which only advances while
+        # the event loop runs it: run it here, with a timeout, and it reads its own reply.
+        reply = conn(f".u.sub[;`] each {tabs}")
         conn.poll_send(0)
-        # Each .u.sub replies (table name; empty schema). Live updates for tables we have
-        # already subscribed to may arrive in between: buffer them, don't mistake them for replies.
-        replies, early = 0, []
-        while replies < len(TABLES):
-            msg = conn.poll_recv()
-            if msg is None:
-                time.sleep(0.001)
-            elif self._is_upd(msg):
-                early.append(msg)
-            else:
-                replies += 1
+        loop.run_until_complete(asyncio.wait_for(reply, timeout=15))   # raises if it failed
         print("Engine: subscribed to " + ", ".join(TABLES), flush=True)
         self.bootstrap()
-        for msg in early:
-            self._dispatch(msg)
         while True:
-            msg = conn.poll_recv()
+            msg = conn.poll_recv()                        # no pending calls now: returns each upd
             if msg is None:
                 self.tick()
                 time.sleep(0.002)
@@ -149,11 +145,6 @@ class Runner:
             return list(msg)
         except TypeError:
             return []
-
-    @staticmethod
-    def _is_upd(msg) -> bool:
-        parts = Runner._parts(msg)
-        return len(parts) == 3 and parts[0].py() == "upd"
 
     def _dispatch(self, msg):
         parts = self._parts(msg)
@@ -200,6 +191,9 @@ def main():
         r.run_stream() if args.mode == "stream" else r.run_poll()
     except KeyboardInterrupt:
         print("\nStopped.")
+    except (ConnectionError, RuntimeError, kx.QError) as e:   # tickerplant / RDB went away
+        print(f"Engine: lost the kdb+ connection ({type(e).__name__}: {e}); stopping", flush=True)
+        return 1
     finally:
         r.out.close()
     return 0

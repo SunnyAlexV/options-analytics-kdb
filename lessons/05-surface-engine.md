@@ -184,3 +184,25 @@ python scripts/eval_surface.py --recording ~/kdbdata/raw --start 14 --minutes 15
 2. Zeliade's method enumerates 42 constraint combinations. Why is the best *feasible* one guaranteed to be the global optimum? (Hint: convexity.)
 3. The arbitrage-free fit costs about 1–4% in prediction accuracy. When would a desk accept that cost, and when would it want the raw fit?
 4. The parity forward sits about $45 below Deribit's for long expiries. Design a test that tells apart "futures trade rich" from "our regression is biased for long expiries".
+
+## Debugging note: the subscription that never finished
+
+The first version of stream mode subscribed, then waited with `while not fut.done(): conn.poll_recv()`.
+The tickerplant received the `.u.sub` call and replied, yet the loop spun forever.
+
+The cause was in PyKX, not kdb+. `RawQConnection(...)` calls do **not** return the QFuture that
+`poll_recv` resolves. They return an `asyncio.Task` wrapping it, and a Task advances only while its
+event loop runs. `poll_recv` read the reply and resolved the inner future, but nothing ever ran the
+loop, so the Task we were watching stayed "not done".
+
+The fix runs that Task on the subscriber's own loop, with a timeout:
+
+```python
+reply = conn(".u.sub[;`] each `ref`snap`quote")   # one call: no live upd can interleave with replies
+conn.poll_send(0)
+loop.run_until_complete(asyncio.wait_for(reply, timeout=15))   # raises if .u.sub failed
+```
+
+After that, no call is pending, so every `poll_recv()` returns the next async `(upd; table; rows)` message.
+Lesson: when a library hands you a future, check *which* future it is. Here a fake tickerplant
+that logged its side of the conversation proved the reply was sent, which pointed straight at the client.

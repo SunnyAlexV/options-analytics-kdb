@@ -51,9 +51,6 @@ def test_records_handles_pandas_string_and_timestamp_columns():
     assert rows[0]["sym"] == "a" and rows[1]["t"] == 2 and np.isnan(rows[1]["x"])
 
 
-@pytest.mark.xfail(reason="KNOWN ISSUE (9 Oct 2026): subscription now works, but the subscriber "
-                   "connection is closed before the first upd arrives; root cause not yet found. "
-                   "Poll mode is the default meanwhile.", strict=False)
 def test_stream_mode_subscribes_and_publishes():
     now = time.time_ns()
     data = frames(now)
