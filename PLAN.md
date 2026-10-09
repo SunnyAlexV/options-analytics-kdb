@@ -102,7 +102,7 @@ These are the pieces that separate a demo from a system a desk would actually ru
 3. **C++ pricing** — Black-76, IV solver, full Greek set, tests ✅ (calc engine wiring into the tickerplant comes with Phase 4)
 4. **Vol surface** — live engine, parity forwards, SVI raw + arbitrage-free, evaluation harness ✅
 5. **Risk** — portfolio Greeks, vega buckets, scenario grid, P&L explain, VaR/ES with backtest ✅ (smile-rule verdict, 4 h of live BTC data on 9 Oct 2026: sticky-moneyness, R = 0, won both folds; [results/phase5_smile_rules.md](results/phase5_smile_rules.md))
-6. **Dashboard** — Dash + Plotly, Market / Risk / System pages over the gateway; public-demo bundle recorded (Hugging Face deploy next) ✅
+6. **Dashboard** — Dash + Plotly, Market / Risk / System pages over the gateway; public demo on Streamlit Community Cloud (a replay of the 4-hour session) ✅
 7. **Polish** — benchmarks, CI, README, design document, demo video
 8. **Multi-asset** — see below. 8a (every Deribit coin: ETH + 7 USDC coins, inverse and linear conventions) ✅; India on hold (no broker API account)
 

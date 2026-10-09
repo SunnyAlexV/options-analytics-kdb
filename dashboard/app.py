@@ -16,6 +16,7 @@ from dash.dash_table.Format import Format, Scheme, Sign
 
 from . import analytics as A
 from . import figures as FG
+from . import tables as TB
 from . import theme as th
 from .sources import assets_in, for_asset
 
@@ -25,8 +26,7 @@ RISK_VIEWS = ["risk_last", "risk1m", "scen_last", "pnl", "vares", "pos", "latest
 SYSTEM_VIEWS = ["dq", "gap", "lat1m", "counts", "latest_surface"]
 
 
-def _fmt(v, f="{:,.0f}", none="–"):
-    return none if v is None or (isinstance(v, float) and not math.isfinite(v)) else f.format(v)
+_fmt = TB.fmt
 
 
 def tile(label, value, sub=""):
@@ -207,8 +207,7 @@ def create_app(source, history=None) -> dash.Dash:
                 keep(FG.series(r1, "vega", "Vega", "USD / vol pt", color=th.AQUA)),
                 keep(FG.series(r1, "gamma", "Gamma", "coins per 1%", color=th.ORANGE)),
                 keep(FG.pnl_path(A.pnl_path(v))),
-                *_simple_table(pos, {"qty": "{:+.2f}", "entry": "{:,.2f}", "iv": "{:.2%}", "delta": "{:+.3f}",
-                                     "gamma_1pct": "{:+.3f}", "vega": "{:+,.0f}", "theta": "{:+,.0f}"})[::-1],
+                *_simple_table(pos, TB.POS_FMT)[::-1],
                 *_var_table(v["vares"])[::-1]]
 
     # ------------------------------------------------------------ system
@@ -232,12 +231,11 @@ def create_app(source, history=None) -> dash.Dash:
                  tile("One-sided books", _fmt(fh.get("onesided", np.nan)), "today"),
                  tile("Feed outages", str(len(v["gap"])), "today")]
         ex = A.expiries(v["latest_surface"], now)
-        fits = ex[["sym", "days", "n", "fsrc", "rmse", "afrmse", "inband", "afinband", "arbgap", "cold"]] if len(ex) else ex
+        fits = ex[TB.FITS_COLS] if len(ex) else ex
         gaps = (v["gap"][["start", "end", "reason"]] if len(v["gap"])
                 else pd.DataFrame({"status": ["no outages recorded"]}))
         return [tiles, keep(FG.dq_quotes(fh["dq"])), keep(FG.latency(fh["dq"], lat)),
-                *_simple_table(fits, {"days": "{:.1f}", "rmse": "{:.2%}", "afrmse": "{:.2%}", "inband": "{:.0%}",
-                                      "afinband": "{:.0%}", "arbgap": "{:.3%}"})[::-1],
+                *_simple_table(fits, TB.FITS_FMT)[::-1],
                 *_simple_table(v["counts"], {"rows": "{:,.0f}"})[::-1],
                 *_simple_table(gaps, {})[::-1]]
 
@@ -245,74 +243,46 @@ def create_app(source, history=None) -> dash.Dash:
 
 
 # ---------------------------------------------------------------- tables
+# formatting lives in dashboard/tables.py (shared with the Streamlit demo); here only the
+# conversion to Dash DataTable columns/records
 def _clock(source, now=None):
     now = source.now() if now is None else now
     return f"data time {now:%Y-%m-%d %H:%M:%S} UTC"
 
 
-def _simple_table(df: pd.DataFrame, fmts: dict):
-    """(columns, data) with values pre-formatted as text (tables show exactly what is formatted)."""
-    if df is None or df.empty:
+def _records(out: pd.DataFrame):
+    if out is None or out.empty:
         return [], []
-    out = df.copy()
-    for c in out.columns:
-        if c in fmts:
-            out[c] = [_fmt(x, fmts[c]) for x in out[c]]
-        elif pd.api.types.is_datetime64_any_dtype(out[c]):
-            out[c] = out[c].dt.strftime("%H:%M:%S")
-        elif pd.api.types.is_float_dtype(out[c]):
-            out[c] = [_fmt(x, "{:,.4g}") for x in out[c]]
-        else:
-            out[c] = out[c].astype(str)
     return [{"name": c, "id": c} for c in out.columns], out.to_dict("records")
 
 
+def _simple_table(df: pd.DataFrame, fmts: dict):
+    """(columns, data) with values pre-formatted as text (tables show exactly what is formatted)."""
+    return _records(TB.text_frame(df, fmts))
+
+
 def _chain_table(ch: pd.DataFrame):
-    fm = {"strike": "{:,.0f}", "bsize": "{:,.1f}", "bid": "{:.4f}", "ask": "{:.4f}", "asize": "{:,.1f}",
-          "bidiv": "{:.2%}", "midiv": "{:.2%}", "askiv": "{:.2%}", "model": "{:.2%}",
-          "markiv": "{:.2%}", "delta": "{:+.3f}", "gamma": "{:.2e}", "vega": "{:,.4g}", "theta": "{:,.4g}",
-          "oi": "{:,.1f}", "vol": "{:,.1f}"}
-    cols, data = _simple_table(ch.drop(columns=["rich"]) if len(ch) else ch, fm)
-    if not cols:
+    out = TB.chain_frame(ch)
+    if out.empty:
         return [], [], []
+    cols, data = _records(out)
+    i = [c["id"] for c in cols].index("rich")
     # "rich" stays a number (formatted by the table), so the colour rule compares numbers:
     # beyond one half-spread rich (red tint) or cheap (blue tint) vs the arbitrage-free smile
-    for row, val in zip(data, ch["rich"]):
-        row["rich"] = round(float(val), 2) if np.isfinite(val) else None
-    i = [c["id"] for c in cols].index("model") + 1
-    cols.insert(i, {"name": "rich", "id": "rich", "type": "numeric",
-                    "format": Format(precision=2, scheme=Scheme.fixed, sign=Sign.positive)})
+    cols[i] = {"name": "rich", "id": "rich", "type": "numeric",
+               "format": Format(precision=2, scheme=Scheme.fixed, sign=Sign.positive)}
     style = [{"if": {"filter_query": "{rich} >= 1", "column_id": "rich"}, "backgroundColor": "rgba(230,103,103,0.28)"},
              {"if": {"filter_query": "{rich} <= -1", "column_id": "rich"}, "backgroundColor": "rgba(57,135,229,0.28)"}]
     return cols, data, style
 
 
 def _fwd_table(ts: pd.DataFrame):
-    if ts.empty:
-        return [], []
-    keep = [c for c in ["sym", "days", "F", "basis", "carry", "diff", "D", "r_impl", "r_se", "fsrc", "pairs", "atmvol",
-                        "rr25", "bf25"] if c in ts]
-    return _simple_table(ts[keep], {"days": "{:.1f}", "F": "{:,.0f}", "basis": "{:+.3%}", "carry": "{:+.2%}",
-                                    "diff": "{:+,.1f}", "D": "{:.5f}", "r_impl": "{:+.2%}", "r_se": "±{:.2%}", "pairs": "{:,.0f}",
-                                    "atmvol": "{:.2%}", "rr25": "{:+.2%}", "bf25": "{:+.2%}"})
+    return _records(TB.fwd_frame(ts))
 
 
 def _tape_table(t: pd.DataFrame):
-    if t is None or t.empty:
-        return [], []
-    keep = t[["time", "sym", "side", "size", "price", "usd", "iv"]].copy()
-    keep["iv"] = keep["iv"] / 100
-    return _simple_table(keep, {"size": "{:,.1f}", "price": "{:.4f}", "usd": "{:,.2f}", "iv": "{:.2%}"})
+    return _records(TB.tape_frame(t))
 
 
 def _var_table(v: pd.DataFrame):
-    if v is None or v.empty:
-        return [], []
-    last = v[v["time"] == v["time"].max()]
-    out = pd.DataFrame({
-        "method": last["method"].str.upper(), "VaR 99%": last["var99"], "ES 97.5%": last["es975"],
-        "ES 99%": last["es99"], "window (days)": last["window"],
-        "backtest": [f"{e} / {d} days (expected {d * 0.01:.1f})" for e, d in zip(last["btexc"], last["btdays"])],
-        "Kupiec p": last["kupiec"], "source": last["src"].str.replace("_", " ")})
-    return _simple_table(out, {"VaR 99%": "{:,.0f}", "ES 97.5%": "{:,.0f}", "ES 99%": "{:,.0f}",
-                               "window (days)": "{:,.0f}", "Kupiec p": "{:.2f}"})
+    return _records(TB.var_frame(v))

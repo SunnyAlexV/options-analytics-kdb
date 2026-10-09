@@ -127,7 +127,7 @@ A dark trading-desk dashboard (Dash + Plotly), refreshed every 2 seconds through
 
 With several coins running, an **asset selector** in the header switches every Market panel between them (risk stays on the BTC book).
 
-A **public demo** replays a recorded session through the same app on a Hugging Face Space, with no kdb+ or C++ needed (`scripts/make_demo_bundle.py`, `scripts/deploy_demo.py`). Details: [lessons/07](lessons/07-dashboard.md).
+A **public demo** on Streamlit Community Cloud replays a recorded 4-hour session through the same analytics and charts, with no kdb+ or C++ needed (`streamlit_app/`, `scripts/thin_bundle.py`). Details: [lessons/07](lessons/07-dashboard.md).
 
 ## Every Deribit coin (Phase 8a)
 

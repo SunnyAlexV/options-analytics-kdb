@@ -3,7 +3,7 @@
 **What was built:** a dark trading-desk dashboard (Dash + Plotly) with three pages: Market, Risk and System.
 
 - On your machine it reads the live system through the kdb+ gateway every 2 seconds.
-- For everyone else, a **public demo** replays a recorded session through the very same app. It runs on a Hugging Face Space, with no kdb+, no C++ and no licence.
+- For everyone else, a **public demo** replays a recorded session through the very same analytics and charts. It runs free on Streamlit Community Cloud, with no kdb+, no C++ and no licence.
 
 ```
 dashboard/sources.py    every view defined twice: a q query (live) and a pandas function (replay)
@@ -125,18 +125,38 @@ These are two separate charts because their scales differ by about 100 times.
 ```bash
 # 1. a bundle: from the live system (best; exactly what ran) ...
 python scripts/make_demo_bundle.py --gw 5013 --date 2026.10.09 --out demo/bundle
-#    ... or rebuilt offline from a feed recording
-python scripts/make_demo_bundle.py --recording ~/kdbdata/raw --out demo/bundle
-# 2. try it locally, exactly as the Space will run it
-python -m dashboard --replay demo/bundle
-# 3. publish (needs a free Hugging Face account and a write token)
-pip install huggingface_hub && huggingface-cli login
-python scripts/deploy_demo.py --bundle demo/bundle --space SunnyAlexV/btc-options-desk
+#    ... or rebuilt offline from feed recordings (one folder per feed group)
+python scripts/make_demo_bundle.py --recording ~/rec/BTC ~/rec/ETH ~/rec/USDC --out demo/bundle
+# 2. thin it to one row per instrument per minute, into the folder the demo app reads
+python scripts/thin_bundle.py demo/bundle streamlit_app/bundle --every 60
+# 3. commit and push; Streamlit Community Cloud redeploys from GitHub
 ```
 
-The Space is a Docker app (`deploy/hf-space/`). It contains only `dashboard/`, `feed/schema.py`, `risk/history.py` and the bundle, plus the 5-year index and DVOL history saved inside the bundle, so it needs no network. It runs under gunicorn with one worker, because the replay clock lives in that process.
+**Why Streamlit, not the Dash app itself.** The first plan was a Hugging Face Space running the Dash
+app in Docker (`deploy/hf-space/`, `scripts/deploy_demo.py`, both kept). In July 2026 Hugging Face
+stopped hosting Docker Spaces on free accounts. Streamlit Community Cloud is free, deploys straight
+from the GitHub repo, and gives apps up to 2.7 GB of memory; the demo uses about 450 MB.
 
-**How it was verified:** the Space folder was assembled, its exact pinned requirements were installed in a clean Python 3.12 environment, gunicorn was started from that folder alone, and all three pages were rendered in a headless browser with no errors. Docker itself wasn't available, so the image hasn't been built here; Hugging Face builds it from the same files.
+**One set of numbers, two front ends.** `streamlit_app/app.py` is only a layout. It imports the same
+`ReplaySource` (dashboard/sources.py), the same calculations (`dashboard/analytics.py`), the same Plotly
+figures (`dashboard/figures.py`) and the same table formatting (`dashboard/tables.py`, shared with the
+Dash app since this change). So the demo cannot drift from what the live dashboard computes.
+
+- **The replay clock** runs at 10x real time and loops; the source is cached once per server
+  (`st.cache_resource`), so every visitor sees the same moment, like a live market.
+- **Refreshing** uses `st.fragment(run_every=3)`: only the page body reruns, not the header.
+- **Pausing** ("Live replay" off) swaps the clock for a slider over every minute of the session; the
+  same views are computed at that moment (`ReplaySource.views(names, now)`).
+- **Dependencies:** `streamlit_app/requirements.txt` sits next to the entrypoint, so Community Cloud
+  installs only the demo's six packages, not the project's kdb+/C++ environment. The theme
+  (`.streamlit/config.toml`) must sit at the repository root.
+- **Thinning:** the committed bundle keeps the last row per instrument per minute (risk: one whole
+  snapshot per minute, never a mix of two moments). 44 MB became 24 MB with no visible change at chart
+  resolution.
+
+**How it was verified:** the six pinned packages were installed in a clean environment, the app was
+run headless with Streamlit's `AppTest` (every page, live and paused; `tests/test_streamlit_app.py`)
+and in a real server, and each page was rendered in a headless browser with no errors.
 
 ## 7. What the tests prove
 

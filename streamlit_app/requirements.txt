@@ -1,0 +1,9 @@
+# The Streamlit Community Cloud demo (streamlit_app/app.py). Community Cloud reads this file
+# because it sits next to the entrypoint, so the main project's environment.yml / pyproject.toml
+# (kdb+, C++ build) are not installed for the demo. Tested together with these exact versions.
+streamlit==1.65.0
+plotly==7.1.0
+pandas==3.0.5
+numpy==2.5.3
+scipy==1.18.1
+pyarrow==25.0.1
