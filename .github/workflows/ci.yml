@@ -1,0 +1,62 @@
+# Continuous integration: every push and pull request builds the C++ library, runs its unit
+# tests, builds the Python extension and runs the Python test suite, and checks that the public
+# Streamlit demo still starts. kdb+ itself needs a licence, so the end-to-end system test
+# (scripts/system_test.py) is run locally, not here; the Python tests talk to small fake kdb+
+# servers instead (tests/fake_kdb.py, PyKX in unlicensed mode).
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cpp:
+    name: C++ library and GoogleTest
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Configure (tests on, Python module off)
+        run: cmake -S . -B build-tests -DOAK_BUILD_TESTS=ON -DOAK_BUILD_PYTHON=OFF -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build-tests -j 4
+      - name: Test
+        run: ctest --test-dir build-tests --output-on-failure
+
+  python:
+    name: Python tests (with the C++ extension)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ci/requirements.txt
+      - name: Install dependencies
+        run: pip install -r ci/requirements.txt
+      - name: Build and install the C++ pricing extension
+        run: pip install -e .
+      - name: Run the test suite
+        env:
+          PYKX_UNLICENSED: "true"
+        run: pytest -q -ra
+
+  demo:
+    name: Public demo starts (Streamlit)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: streamlit_app/requirements.txt
+      - name: Install the demo's own pinned packages (what Streamlit Cloud installs)
+        run: pip install -r streamlit_app/requirements.txt pytest==9.1.1
+      - name: Every page renders, both sessions, several coins
+        run: pytest -q -ra tests/test_streamlit_app.py

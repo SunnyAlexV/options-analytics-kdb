@@ -1,14 +1,16 @@
 # options-analytics-kdb
 
+[![CI](https://github.com/SunnyAlexV/options-analytics-kdb/actions/workflows/ci.yml/badge.svg)](https://github.com/SunnyAlexV/options-analytics-kdb/actions/workflows/ci.yml)
+
 A live options analytics system for every option Deribit lists: BTC and ETH (coin-settled) and seven USDC-settled coins (BTC, ETH, SOL, XRP, AVAX, TRX, HYPE). It is built the way an options desk builds one:
 
 - **kdb+/q** for tick capture, storage and queries, on KX's standard kdb+tick architecture
 - **C++** for pricing, implied vol and calibration
 - **Python** for the data feed, orchestration and the dashboard
 
-**Live demo:** [options-analytics-kdb.streamlit.app](https://options-analytics-kdb.streamlit.app/), a replay of a recorded 4-hour BTC session through the same analytics and charts (it may take a minute to wake up if nobody has visited for a while).
+**Live demo:** [options-analytics-kdb.streamlit.app](https://options-analytics-kdb.streamlit.app/), replays of recorded live sessions (every Deribit option market for 25 minutes; BTC for 4 hours) through the same analytics and charts (it may take a minute to wake up if nobody has visited for a while).
 
-> **Status:** Phases 0–6 complete (feed, kdb+ core, C++ pricing, live vol surface, portfolio risk, dashboard), plus 8a (every Deribit coin); Phase 7 (polish) next. See [PLAN.md](PLAN.md) for the full design and roadmap.
+> **Status:** Phases 0–6 complete (feed, kdb+ core, C++ pricing, live vol surface, portfolio risk, dashboard), Phase 7 polish (CI, benchmarks, design document), and 8a (every Deribit coin). **Start with the [design document](docs/DESIGN.md)**: how it fits together, the main decisions and the evidence behind each. Roadmap: [PLAN.md](PLAN.md); speed: [benchmarks](results/benchmarks.md).
 
 ## Architecture
 
@@ -28,9 +30,9 @@ Deribit ──► Feed handler (Python) ──► Tickerplant (q) ──► Real
 
 Phase 3 onwards:
 
-- **Implied vols** — Black-76 on each expiry's forward, with inverse (BTC-settled) conventions.
+- **Implied vols** — Black-76 on each expiry's forward, under each market's premium convention (inverse for coin-settled BTC/ETH, linear for USDC-settled).
 - **Greeks** — first, second and cross order.
-- **The volatility surface** — SVI/SSVI, with arbitrage checks.
+- **The volatility surface** — SVI per expiry, raw and arbitrage-free.
 - **Surface metrics** — risk reversals, butterflies, term structure.
 - **Realised vol and the variance risk premium.**
 - **Portfolio risk** — scenario grids, P&L explain, VaR.
@@ -47,7 +49,7 @@ bash scripts/start.sh            # tickerplant, HDB, RDB, gateway, live feed, su
 bash scripts/status.sh
 bash scripts/stop.sh
 python scripts/system_test.py    # end-to-end test on a throwaway copy of the system
-pytest                           # unit tests (Python)
+pytest                           # unit tests (Python); CI runs these, the C++ tests and the demo on every push
 python scripts/validate_deribit.py   # our implied vols vs Deribit's mark IVs, live
 python scripts/bench_iv.py           # C++ vs Python timings
 python scripts/eval_surface.py --recording ~/kdbdata/raw   # score surface design choices
@@ -56,21 +58,17 @@ python scripts/eval_smile_rules.py --recording ~/kdbdata/raw   # which smile rul
 
 ## Pricing library (C++, Phase 3)
 
-- **Black-76** on each expiry's forward, with Deribit's inverse (BTC-settled) convention.
+- **Black-76** on each expiry's forward; the inverse (coin-settled) and linear (USDC-settled) premium conventions are handled in `engine/conventions.py`.
 - **Greeks:** price plus 12 Greeks — first, second and cross order — each verified against bump-and-revalue.
-- **Implied vol:** a safeguarded Newton solver, accurate to within the double-precision limit.
+- **Implied vol:** a safeguarded Newton solver: median error 4e-16 in vol on a 1,000-option test chain; it declines (rather than guesses) prices more than ~7 standard deviations from the money, where no vol can be recovered.
 
-On 1,000 options:
-
-| | C++ | SciPy `brentq` loop |
-|---|---|---|
-| Implied vol, per option | ~0.6 µs | ~3,900 µs |
+On 1,000 options, an implied vol takes under a microsecond in C++ against about 2 ms per option for a SciPy `brentq` loop, a few thousand times faster. Every timing (pricing, smile fits, risk, engine throughput) is in [results/benchmarks.md](results/benchmarks.md), produced by `python scripts/benchmarks.py`.
 
 Against Deribit's own marks, our implied vols match `mark_iv` to a median of about 1 bp on well-conditioned options. Deribit rounds `mark_iv` to 1 bp.
 
 ## Live volatility surface (Phase 4)
 
-A streaming real-time engine subscribes to the tickerplant. For every quote it computes bid, ask and mid implied vols. For each expiry it estimates the forward **and the BTC discount factor** from put-call parity across the whole chain. It then fits **two SVI smiles** per expiry (raw, and arbitrage-free under butterfly, calendar and Lee constraints) and publishes everything back through the tickerplant.
+A streaming real-time engine subscribes to the tickerplant. For every quote it computes bid, ask and mid implied vols. For each expiry it estimates the forward **and the discount factor** from put-call parity across the whole chain. It then fits **two SVI smiles** per expiry (raw, and arbitrage-free under butterfly, calendar and Lee constraints) and publishes everything back through the tickerplant.
 
 **Design choices are decided by an evaluation harness**, not by assumption: each configuration predicts the next 10 seconds of quotes out of sample, and is checked on two separate halves of the data.
 
