@@ -94,3 +94,51 @@ def test_poll_mode_reads_new_rows_and_publishes():
         assert sum(pub["iv"]) == len(data["quote"]) - half             # exactly the new rows, once each
     finally:
         tp.stop(); rdb.stop()
+
+
+def risk_frames(now_ns):
+    """RDB contents for the risk process: fitted smiles, a spot index, listed strikes."""
+    from tests.test_risk import EXPIRIES
+    ts = lambda v: pd.to_datetime(v, unit="ns")  # noqa: E731
+    surf = []
+    for days, label in EXPIRIES:
+        T = days / 365
+        surf.append({"sym": label, "expiry": now_ns + days * 86_400_000_000_000, "T": T, "F": 80000.0,
+                     "afa": 0.18 * T, "afb": 0.6 * T, "afrho": -0.3, "afm": 0.02, "afsigma": 0.2})
+    sdf = pd.DataFrame(surf)
+    sdf["expiry"] = ts(sdf["expiry"])
+    strikes = [s for s in range(40000, 160001, 1000)]
+    ref = pd.DataFrame([{"sym": f"{lab}-{k}-{cp}", "kind": "option", "strike": float(k)}
+                        for _, lab in EXPIRIES for k in strikes for cp in "CP"])
+    return {"surface": sdf, "spot": pd.DataFrame({"price": [80000.0]}), "ref": ref}
+
+
+def test_risk_process_publishes_risk_scenarios_and_pnl(tmp_path):
+    from risk.__main__ import RiskProcess
+    data = risk_frames(time.time_ns())
+    tp = ServerProcess("tp", {t: df.iloc[:0] for t, df in data.items()})
+    rdb = ServerProcess("rdb", data)
+    try:
+        a = argparse.Namespace(tp_port=tp.port, rdb_port=rdb.port, currency="BTC", R=0.0, book=None,
+                               data=str(tmp_path), risk_every=0.5, scen_every=0.5, pnl_every=1.0,
+                               var_every=1e9, var_window=365)
+        p = RiskProcess(a)
+
+        def target():
+            try:
+                p.run()
+            except (ConnectionError, RuntimeError):
+                pass
+
+        threading.Thread(target=target, daemon=True).start()
+        subs, _ = tp.wait_for(lambda s, p_: len(s) == 2)
+        assert subs == ["spot", "surface"], "risk process did not subscribe"
+        tp.publish("spot", pd.DataFrame({"sym": ["BTC"], "price": [80100.0]}))
+        _, pub = tp.wait_for(lambda s, p_: {"pos", "risk", "scen", "pnl"} <= set(p_))
+        assert pub.get("pos") == [8], "sample book: 7 option legs + 1 hedge future"
+        assert pub.get("risk") and pub.get("scen"), "no risk / scenario rows"
+        assert pub["scen"][0] == 77, "11 spot moves x 7 vol shifts"
+        assert pub.get("pnl"), "no P&L explain rows"
+        assert p.spot == 80100.0, "spot update via the tickerplant not applied"
+    finally:
+        tp.stop(); rdb.stop()

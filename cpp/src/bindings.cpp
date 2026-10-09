@@ -14,6 +14,7 @@
 #include <string>
 
 #include "oak/black76.hpp"
+#include "oak/risk.hpp"
 #include "oak/svi.hpp"
 
 namespace py = pybind11;
@@ -106,6 +107,14 @@ PYBIND11_MODULE(_core, m) {
         return out;
     }, "Total variance w(k) for SVI parameters [a, b, rho, m, sigma]");
 
+    m.def("svi_dw", [to_svi](const std::vector<double>& p, Arr k) {
+        const auto P = to_svi(p);
+        Arr out(k.size());
+        auto kk = k.unchecked<1>(); auto o = out.mutable_unchecked<1>();
+        for (py::ssize_t i = 0; i < k.size(); ++i) o(i) = oak::svi_dw(P, kk(i));
+        return out;
+    }, "Smile slope dw/dk for SVI parameters [a, b, rho, m, sigma]");
+
     m.def("svi_g", [to_svi](const std::vector<double>& p, Arr k) {
         const auto P = to_svi(p);
         Arr out(k.size());
@@ -144,4 +153,65 @@ PYBIND11_MODULE(_core, m) {
     }, py::arg("k"), py::arg("iv"), py::arg("hs"), py::arg("wt"), py::arg("T"),
        py::arg("arb_free") = false, py::arg("prev") = py::none(), py::arg("init") = py::none(),
        py::arg("hs_floor") = 0.0025);
+
+    // ------------------------------------------------------------------ risk
+    // smiles: F[n], T[n], P[n x 5] (SVI params per expiry); book: one entry per position;
+    // scenarios: one entry per scenario. Returns the book's USD value under each scenario.
+    using IArr = py::array_t<std::int64_t, py::array::c_style | py::array::forcecast>;
+    using PArr = py::array_t<double, py::array::c_style | py::array::forcecast>;
+    auto make_smiles = [](Arr F, Arr T, PArr P) {
+        if (P.ndim() != 2 || P.shape(1) != 5 || P.shape(0) != F.size() || T.size() != F.size())
+            throw std::invalid_argument("smiles: F[n], T[n] and params[n, 5] required");
+        auto f = F.unchecked<1>(); auto t = T.unchecked<1>(); auto p = P.unchecked<2>();
+        std::vector<oak::Smile> sm;
+        for (py::ssize_t i = 0; i < F.size(); ++i)
+            sm.push_back({f(i), t(i), oak::SVI{p(i, 0), p(i, 1), p(i, 2), p(i, 3), p(i, 4)}});
+        return sm;
+    };
+
+    m.def("book_values", [make_smiles](Arr qty, Arr K, IArr slice, BArr call, BArr future,
+                                       Arr F, Arr T, PArr P,
+                                       Arr dlnF, Arr dvol, Arr vscale, Arr dt, double R) {
+        const auto n = common_len({qty.size(), K.size(), slice.size(), call.size(), future.size()});
+        const auto m_ = common_len({dlnF.size(), dvol.size(), vscale.size(), dt.size()});
+        const auto sm = make_smiles(F, T, P);
+        auto q = qty.unchecked<1>(); auto k = K.unchecked<1>(); auto s = slice.unchecked<1>();
+        auto c = call.unchecked<1>(); auto fu = future.unchecked<1>();
+        std::vector<oak::Position> book;
+        for (py::ssize_t i = 0; i < n; ++i)
+            book.push_back({q(i), k(i), static_cast<int>(s(i)), c(i), fu(i)});
+        auto x = dlnF.unchecked<1>(); auto dv = dvol.unchecked<1>();
+        auto vs = vscale.unchecked<1>(); auto tt = dt.unchecked<1>();
+        std::vector<oak::Scenario> sc;
+        for (py::ssize_t j = 0; j < m_; ++j) sc.push_back({x(j), dv(j), vs(j), tt(j)});
+        std::vector<double> v;
+        {
+            py::gil_scoped_release nogil;
+            v = oak::book_values(book, sm, sc, R);
+        }
+        Arr out(m_);
+        auto o = out.mutable_unchecked<1>();
+        for (py::ssize_t j = 0; j < m_; ++j) o(j) = v[static_cast<std::size_t>(j)];
+        return out;
+    }, "Book value (USD) under each scenario, full revaluation off SVI smiles with stickiness R");
+
+    m.def("smile_vol", [make_smiles](Arr F, Arr T, PArr P, IArr slice, Arr K, double dlnF, double R) {
+        const auto sm = make_smiles(F, T, P);
+        const auto n = common_len({slice.size(), K.size()});
+        auto s = slice.unchecked<1>(); auto k = K.unchecked<1>();
+        Arr out(n); auto o = out.mutable_unchecked<1>();
+        for (py::ssize_t i = 0; i < n; ++i)
+            o(i) = oak::smile_vol(sm.at(static_cast<std::size_t>(s(i))), k(i), dlnF, R);
+        return out;
+    }, "Implied vol at each strike after a log forward move dlnF, stickiness R");
+
+    m.def("smile_slope", [make_smiles](Arr F, Arr T, PArr P, IArr slice, Arr K) {
+        const auto sm = make_smiles(F, T, P);
+        const auto n = common_len({slice.size(), K.size()});
+        auto s = slice.unchecked<1>(); auto k = K.unchecked<1>();
+        Arr out(n); auto o = out.mutable_unchecked<1>();
+        for (py::ssize_t i = 0; i < n; ++i)
+            o(i) = oak::smile_slope(sm.at(static_cast<std::size_t>(s(i))), k(i));
+        return out;
+    }, "d sigma / dk of each expiry's smile at each strike");
 }

@@ -15,12 +15,9 @@ tickerplant, so they are logged, replayable and saved to the HDB like market dat
 from __future__ import annotations
 
 import argparse
-import asyncio
 import os
 import sys
 import time
-
-import pandas as pd
 
 os.environ.setdefault("PYKX_UNLICENSED", "true")
 import pykx as kx  # noqa: E402
@@ -28,43 +25,9 @@ import pykx as kx  # noqa: E402
 from feed.sinks import TickerplantSink  # noqa: E402
 
 from .core import EngineConfig, SurfaceEngine  # noqa: E402
+from .ipc import Subscriber, records  # noqa: E402,F401  (records: used by tests)
 
 TABLES = ("ref", "snap", "quote")
-
-
-def records(table) -> list[dict]:
-    """q table (pykx) -> list of dicts, timestamps as int ns, symbols as str.
-
-    Column types are checked with pandas' own API: pandas 3 stores text in its own
-    string dtype, which NumPy's type checks cannot interpret.
-    """
-    df = table.pd()
-    for c in df.columns:
-        col = df[c]
-        if pd.api.types.is_datetime64_any_dtype(col):
-            df[c] = col.astype("int64")
-        elif pd.api.types.is_string_dtype(col) or col.dtype == object:
-            df[c] = col.astype(object).where(col.notna(), "").map(str)
-    return df.to_dict("records")
-
-
-def open_subscriber(port: int):
-    """PyKX's RawQConnection must be awaited to open (an asyncio pattern); do that once here.
-    After that, poll_send / poll_recv are ordinary non-blocking calls.
-
-    no_ctx=True on every connection in this project: by default PyKX sends an extra
-    query on connect to introspect the server's namespaces (its "context interface"),
-    which we never use -- one less round trip, and nothing unexpected sent to a tickerplant."""
-    # PyKX looks the event loop up again on later calls, so it must stay open and be this
-    # thread's current loop (asyncio.run would close it straight after connecting).
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    conn = loop.run_until_complete(_await(kx.RawQConnection(port=port, no_ctx=True, event_loop=loop)))
-    return conn, loop
-
-
-async def _await(x):
-    return await x
 
 
 class Runner:
@@ -114,53 +77,19 @@ class Runner:
 
     # ------------------------------------------------------------ stream mode
     def run_stream(self):
-        conn, loop = open_subscriber(self.args.tp_port)
-        try:
-            # ONE call subscribes to all three tables. PyKX's raw connection treats every incoming
-            # message as the reply to the oldest pending call while any call is pending, so a live
-            # upd arriving between several .u.sub replies would be mistaken for a reply. The
-            # tickerplant is single-threaded: it finishes this call, and replies, before it
-            # publishes anything to us, so nothing can interleave.
-            tabs = "".join("`" + t for t in TABLES)
-            # The call returns an asyncio Task (wrapping PyKX's QFuture), which only advances while
-            # the event loop runs it: run it here, with a timeout, and it reads its own reply.
-            reply = conn(f".u.sub[;`] each {tabs}")
-            conn.poll_send(0)
-            loop.run_until_complete(asyncio.wait_for(reply, timeout=15))   # raises if it failed
+        with Subscriber(self.args.tp_port, TABLES) as sub:        # engine/ipc.py: the .u.sub handshake
             print("Engine: subscribed to " + ", ".join(TABLES), flush=True)
             self.bootstrap()
-            while True:
-                msg = conn.poll_recv()                        # no pending calls now: returns each upd
+            for msg in sub:
                 if msg is None:
                     self.tick()
                     time.sleep(0.002)
                     continue
-                self._dispatch(msg)
+                if msg[0] == "upd":
+                    self.handle(msg[1], msg[2])
+                else:                                      # end of day: state carries on
+                    print(f"Engine: end of day {msg[1]}", flush=True)
                 self.tick()
-        finally:
-            try:
-                loop.run_until_complete(conn.close())     # PyKX closes raw connections asynchronously
-            except Exception:
-                pass
-
-    # Unlicensed PyKX cannot index into q objects (msg[0] raises a licence error), but it
-    # can iterate over them: list(msg) gives the elements as q objects, which convert fine.
-    @staticmethod
-    def _parts(msg) -> list:
-        try:
-            return list(msg)
-        except TypeError:
-            return []
-
-    def _dispatch(self, msg):
-        parts = self._parts(msg)
-        if not parts:
-            return
-        fn = parts[0].py()
-        if fn == "upd":                                   # (`upd; `table; rows)
-            self.handle(parts[1].py(), records(parts[2]))
-        elif fn == ".u.end":                              # end of day: nothing to reset, state carries on
-            print(f"Engine: end of day {parts[1].py()}", flush=True)
 
     # -------------------------------------------------------------- poll mode
     def run_poll(self):

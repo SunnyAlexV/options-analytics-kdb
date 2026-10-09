@@ -6,8 +6,8 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 source "$ROOT/config.env"
 
 printf '%-6s %-6s %-8s %-6s %s\n' PART STATE PID PORT LOG
-for p in tp hdb rdb gw feed engine; do
-  case $p in tp) port=$TP_PORT;; hdb) port=$HDB_PORT;; rdb) port=$RDB_PORT;; gw) port=$GW_PORT;; feed|engine) port=-;; esac
+for p in tp hdb rdb gw feed engine risk; do
+  case $p in tp) port=$TP_PORT;; hdb) port=$HDB_PORT;; rdb) port=$RDB_PORT;; gw) port=$GW_PORT;; feed|engine|risk) port=-;; esac
   f="$RUN/$p.pid"
   if [ -f "$f" ] && kill -0 "$(cat "$f")" 2>/dev/null; then state=UP; pid=$(cat "$f"); else state=down; pid=-; fi
   printf '%-6s %-6s %-8s %-6s %s\n' "$p" "$state" "$pid" "$port" "$LOGS/$p.log"

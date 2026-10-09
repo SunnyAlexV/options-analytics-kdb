@@ -155,6 +155,7 @@ def sample_rows():
         "dq": [m.row()],
         "gap": [{"sym": "BTC", "asset": "BTC", "start": RECV, "end": RECV + 5, "reason": "silent"}],
         **engine_rows(),
+        **risk_rows(),
     }
 
 
@@ -171,6 +172,31 @@ def engine_rows():
     ivs = eng.on_quotes(quotes)
     fwd, surf = eng.refit(now, force=True)
     return {"iv": ivs, "fwd": fwd, "surface": surf}
+
+
+def risk_rows():
+    """pos / risk / scen / pnl / vares rows, built by the same functions the risk process uses."""
+    pytest.importorskip("pricing", reason="build the C++ module first: pip install -e .")
+    import numpy as np
+    import pandas as pd
+    from risk import rows as R
+    from risk import var as varmod
+    from risk.book import sample_book
+    from risk.core import aggregate, pnl_explain, pnl_rows, position_greeks, scenario_grid
+    from tests.test_risk import NOW, NS, market
+    m0, m1 = market(), market(now=NOW + 60 * NS, dlnF=0.001)
+    book = sample_book(m0, hedge_rule_R=0.0)
+    rng = np.random.default_rng(0)
+    hist = pd.DataFrame({"date": pd.date_range("2025-01-01", periods=400, freq="D"),
+                         "spot": 80000 * np.exp(np.cumsum(rng.normal(0, 0.02, 400))),
+                         "dvol": 50 * np.exp(np.cumsum(rng.normal(0, 0.03, 400)))})
+    res = varmod.compute(book, m0, hist, R=0.0)
+    bt = varmod.backtest(book, m0, hist, R=0.0, test_days=20)
+    return {"pos": R.pos_rows(book, "BTC"),
+            "risk": R.risk_rows(aggregate(position_greeks(book, m0, R=0.0)), "BTC"),
+            "scen": R.scen_rows(scenario_grid(book, m0, R=0.0), "sample", "BTC"),
+            "pnl": R.pnl_q_rows(pnl_rows(pnl_explain(book, m0, m1, R=0.0)), "BTC"),
+            "vares": R.vares_rows(res, bt, "sample", "BTC", 0.0)}
 
 
 def test_every_table_converts_to_correctly_typed_q_columns():

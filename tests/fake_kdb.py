@@ -150,6 +150,12 @@ class FakeRDB(FakeServer):
             return kx.toq(self.tables[t].iloc[a:b + 1].reset_index(drop=True))
         if q.startswith("count "):
             return kx.LongAtom(len(self.tables[q.split()[1]]))
+        if q.startswith("select last price from "):         # risk: latest spot index
+            t = self.tables[q.split("from ")[1].split()[0]]
+            return kx.toq(pd.DataFrame({"price": [float(t["price"].iloc[-1]) if len(t) else float("nan")]}))
+        if q == "select sym, strike from ref where kind=`option":   # risk: listed strikes
+            r = self.tables["ref"]
+            return kx.toq(r[r["kind"] == "option"][["sym", "strike"]].reset_index(drop=True))
         if "select by sym from" in q:                        # latest row per sym
             t = q.split("from ")[1].split()[0]
             return kx.toq(self.tables[t].groupby("sym", sort=False).tail(1).reset_index(drop=True))

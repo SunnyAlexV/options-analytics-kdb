@@ -94,6 +94,41 @@ FEED_SCHEMAS: dict[str, list[tuple[str, str]]] = {
         ("afrmse", "f"), ("afinband", "f"), ("afming", "f"), ("afcal", "f"), ("arbgap", "f"),
         ("atmvol", "f"), ("rr25", "f"), ("bf25", "f"), ("cold", "b"),
     ],
+    # ---- published by the risk process (risk/), Phase 5. sym = book name ----
+    # Positions, one row per instrument held (republished at each start of day, so every HDB
+    # date holds the book it was risk-managed with). Futures: sym = expiry label, strike null.
+    "pos": [
+        ("sym", "s"), ("asset", "s"), ("book", "s"), ("kind", "s"), ("expiry", "p"),
+        ("strike", "f"), ("cp", "s"), ("qty", "f"), ("entry", "f"),
+    ],
+    # Risk by bucket: kind = total | expiry | delta; bucket = ALL, an expiry label, or 10P..10C.
+    # mtm = mark-to-market value (USD); "value" is a q keyword, so it is not used as a name.
+    # Units in risk/core.py: USD, BTC, per 1% spot move, per vol point, per day.
+    "risk": [
+        ("sym", "s"), ("asset", "s"), ("kind", "s"), ("bucket", "s"), ("R", "f"),
+        ("mtm", "f"), ("delta", "f"), ("deltaR", "f"), ("deltapa", "f"), ("deltaspot", "f"),
+        ("cashdelta", "f"), ("gamma", "f"), ("cashgamma", "f"), ("vega", "f"), ("theta", "f"),
+        ("vanna", "f"), ("volga", "f"), ("vatm", "f"), ("vrr", "f"), ("vbf", "f"),
+    ],
+    # Scenario grid: full-revaluation P&L for spot moves (dspot, fraction) x vol shifts (dvol, points).
+    "scen": [
+        ("sym", "s"), ("asset", "s"), ("R", "f"), ("dspot", "f"), ("dvol", "f"), ("pnl", "f"),
+    ],
+    # P&L explain per interval [start, end]: Taylor terms, the unexplained rest, and the vega
+    # term split into "smile" (predicted by the smile rule from the price move) and "surf"
+    # (the surface itself re-marked).
+    "pnl": [
+        ("sym", "s"), ("asset", "s"), ("start", "p"), ("end", "p"), ("R", "f"),
+        ("actual", "f"), ("delta", "f"), ("gamma", "f"), ("vega", "f"), ("theta", "f"),
+        ("vanna", "f"), ("volga", "f"), ("unexpl", "f"), ("smile", "f"), ("surf", "f"),
+    ],
+    # VaR / ES (USD losses), per method (hs | fhs), with the hypothetical-P&L backtest of VaR 99%.
+    # (Named vares, and columns wstart/wend, because var and last are q keywords.)
+    "vares": [
+        ("sym", "s"), ("asset", "s"), ("method", "s"), ("R", "f"), ("window", "j"), ("src", "s"),
+        ("wstart", "p"), ("wend", "p"), ("var99", "f"), ("es975", "f"), ("es99", "f"),
+        ("btdays", "j"), ("btexc", "j"), ("kupiec", "f"),
+    ],
 }
 
 # Full q schemas, as stored in the tickerplant, real-time and historical DBs.

@@ -101,7 +101,7 @@ These are the pieces that separate a demo from a system a desk would actually ru
 2. **kdb+ core** — tickerplant, real-time DB, historical DB ✅
 3. **C++ pricing** — Black-76, IV solver, full Greek set, tests ✅ (calc engine wiring into the tickerplant comes with Phase 4)
 4. **Vol surface** — live engine, parity forwards, SVI raw + arbitrage-free, evaluation harness ✅
-5. **Risk** — portfolio Greeks, scenarios, P&L explain, VaR
+5. **Risk** — portfolio Greeks, vega buckets, scenario grid, P&L explain, VaR/ES with backtest ✅ (smile-rule verdict: pending a 4-hour live run, `scripts/eval_smile_rules.py`)
 6. **Dashboard**
 7. **Polish** — benchmarks, CI, README, design document, demo video
 8. **Multi-asset** — see below
