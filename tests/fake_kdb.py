@@ -161,9 +161,11 @@ class FakeRDB(FakeServer):
         if q.startswith("select last price from "):         # risk: latest spot index
             t = pick(q.split("from ")[1].split()[0])
             return kx.toq(pd.DataFrame({"price": [float(t["price"].iloc[-1]) if len(t) else float("nan")]}))
-        if q == "select sym, strike from ref where kind=`option":   # risk: listed strikes
+        if q.startswith("select ") and q.endswith(" from ref where kind=`option"):   # risk: listed strikes
             r = pick("ref")
-            return kx.toq(r[r["kind"] == "option"][["sym", "strike"]].reset_index(drop=True))
+            cols = [c.strip() for c in q[len("select "):q.index(" from ")].split(",")]
+            r = r[r["kind"] == "option"]
+            return kx.toq(r[[c for c in cols if c in r.columns]].reset_index(drop=True))
         if "select by sym from" in q:                        # latest row per sym
             t = q.split("from ")[1].split()[0]
             return kx.toq(pick(t).groupby("sym", sort=False).tail(1).reset_index(drop=True))

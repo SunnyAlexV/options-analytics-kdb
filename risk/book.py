@@ -92,12 +92,24 @@ def _strike_for_delta(params, F, T, call_delta):
     return F * math.exp(k)
 
 
+def _nice_strike(K: float, F: float) -> float:
+    """Round to a strike-like grid when the listed strikes are unknown: steps of 10^(digits-2)
+    of the forward (BTC at 80,000 -> 1,000; SOL at 110 -> 10; TRX at 0.33 -> 0.01)."""
+    step = 10.0 ** (math.floor(math.log10(F)) - 1)
+    return round(K / step) * step
+
+
 def sample_book(mkt: Market, listed: dict[str, list[float]] | None = None,
-                legs=SAMPLE_LEGS, hedge_rule_R: float | None = None, book: str = "sample") -> list[dict]:
+                legs=SAMPLE_LEGS, hedge_rule_R: float | None = None, book: str = "sample",
+                scale: float = 1.0) -> list[dict]:
     """Resolve SAMPLE_LEGS against the live surface. ``listed``: expiry label -> listed strikes
     (from the ref table), so every leg is a real instrument. With ``hedge_rule_R``, a future on
     the front leg's expiry is added that makes the book's rule delta zero: every forward is
-    assumed to move by the same log amount, so it offsets sum(deltaR_i * F_i) / F_hedge."""
+    assumed to move by the same log amount, so it offsets sum(deltaR_i * F_i) / F_hedge.
+    For coins with no dated futures (the USDC coins) that hedge is a synthetic forward: valued at
+    our parity forward, F - entry per unit, exactly like a future.
+    ``scale`` multiplies every quantity: the per-coin books use BTC spot / coin spot, so each leg
+    has the same USD notional as the BTC book's."""
     from .core import position_greeks              # local import: core imports this module
     F, T, P = mkt.smiles()
     usable = [i for i in range(len(mkt.labels)) if T[i] * 365 >= 2]
@@ -108,13 +120,13 @@ def sample_book(mkt: Market, listed: dict[str, list[float]] | None = None,
         if listed and listed.get(mkt.labels[i]):
             K = min(listed[mkt.labels[i]], key=lambda s: abs(s - K))
         else:
-            K = round(K / 1000) * 1000
-        sym = f"{mkt.labels[i]}-{K:.0f}-{cp}"
+            K = _nice_strike(K, F[i])
+        sym = f"{mkt.labels[i]}-{K:g}-{cp}".replace(".", "d")    # Deribit writes 8.5 as 8d5
         if any(r["sym"] == sym for r in rows):           # two legs on one instrument: merge
-            next(r for r in rows if r["sym"] == sym)["qty"] += qty
+            next(r for r in rows if r["sym"] == sym)["qty"] += qty * scale
             continue
         rows.append({"sym": sym, "book": book, "kind": "option", "expiry": int(mkt.expiry[i]),
-                     "strike": float(K), "cp": cp, "qty": float(qty), "entry": math.nan})
+                     "strike": float(K), "cp": cp, "qty": float(qty) * scale, "entry": math.nan})
     # entry prices: today's model value, so P&L starts from zero
     g = position_greeks(rows, mkt, R=1.0 if hedge_rule_R is None else hedge_rule_R)
     for r, v in zip(rows, g["price"]):

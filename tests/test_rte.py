@@ -108,9 +108,12 @@ def risk_frames(now_ns):
     sdf = pd.DataFrame(surf)
     sdf["expiry"] = ts(sdf["expiry"])
     strikes = [s for s in range(40000, 160001, 1000)]
-    ref = pd.DataFrame([{"sym": f"{lab}-{k}-{cp}", "kind": "option", "strike": float(k)}
-                        for _, lab in EXPIRIES for k in strikes for cp in "CP"])
-    return {"surface": sdf, "spot": pd.DataFrame({"price": [80000.0]}), "ref": ref}
+    ref = pd.DataFrame([{"sym": f"{lab}-{k}-{cp}", "kind": "option", "strike": float(k),
+                         "expiry": now_ns + d * 86_400_000_000_000}
+                        for d, lab in EXPIRIES for k in strikes for cp in "CP"])
+    ref["expiry"] = ts(ref["expiry"])
+    return {"surface": sdf, "spot": pd.DataFrame({"sym": ["btc_usd"], "asset": ["BTC"], "price": [80000.0]}),
+            "ref": ref}
 
 
 def test_risk_process_publishes_risk_scenarios_and_pnl(tmp_path):
@@ -133,7 +136,7 @@ def test_risk_process_publishes_risk_scenarios_and_pnl(tmp_path):
         threading.Thread(target=target, daemon=True).start()
         subs, _ = tp.wait_for(lambda s, p_: len(s) == 2)
         assert subs == ["spot", "surface"], "risk process did not subscribe"
-        tp.publish("spot", pd.DataFrame({"sym": ["BTC"], "price": [80100.0]}))
+        tp.publish("spot", pd.DataFrame({"sym": ["btc_usd"], "asset": ["BTC"], "price": [80100.0]}))
         _, pub = tp.wait_for(lambda s, p_: {"pos", "risk", "scen", "pnl"} <= set(p_))
         assert pub.get("pos") == [8], "sample book: 7 option legs + 1 hedge future"
         assert pub.get("risk") and pub.get("scen"), "no risk / scenario rows"

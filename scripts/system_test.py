@@ -78,6 +78,12 @@ def main() -> int:
     print("\n[1] start everything (incl. surface engine, risk and dashboard) and run for 60 s")
     sh("start.sh")
     time.sleep(60)
+    # the first VaR run (every coin's own VaR, then the portfolio's, with backtests) needs the
+    # books built and a day-history download: give it up to 90 s more before counting
+    for _ in range(45):
+        if counts().get("port", 0) > 0:
+            break
+        time.sleep(2)
 
     print("\n[2] schemas and data in the RDB")
     c1 = counts()
@@ -86,7 +92,7 @@ def main() -> int:
         types = types.decode() if isinstance(types, bytes) else "".join(types)
         want = "".join(t for _, t in cols)
         check(types == want, f"{table}: q types {types!r} match schema {want!r}")
-    check(c1.get("quote", 0) > 1000, f"quotes arriving ({c1.get('quote', 0):,} in 60 s)")
+    check(c1.get("quote", 0) > 1000, f"quotes arriving ({c1.get('quote', 0):,} so far)")
     check(c1.get("spot", 0) >= 30, f"spot index arriving ({c1.get('spot', 0)} rows)")
     check(c1.get("ref", 0) > 100, f"reference data loaded ({c1.get('ref', 0)} instruments)")
     # feed received (recv) -> tickerplant stamped (time). time is time-of-day, so
@@ -142,17 +148,21 @@ def main() -> int:
         except Exception as e:
             print(f"  INFO  inverse/linear comparison skipped ({type(e).__name__}: {e})")
 
-    print("\n[2c] risk (sample book, smile rule R = " + ENV.get("RISK_R", "0") + ")")
+    print("\n[2c] risk (a sample book per coin, smile rule R = " + ENV.get("RISK_R", "0") + ")")
     check(c1.get("pos", 0) >= 5, f"positions published ({c1.get('pos', 0)} rows)")
     check(c1.get("risk", 0) > 0, f"risk by bucket published ({c1.get('risk', 0):,} rows)")
     if c1.get("risk", 0):
-        tot = q("rdb", "exec last deltaspot, last vega, last mtm from risk where kind=`total")
-        print(f"  INFO  book: value {tot['mtm']:,.0f} USD, spot delta {tot['deltaspot']:+.3f} BTC, "
+        tot = q("rdb", "exec last deltaspot, last vega, last mtm from risk where kind=`total, asset=`BTC")
+        print(f"  INFO  BTC book: value {tot['mtm']:,.0f} USD, spot delta {tot['deltaspot']:+.3f} BTC, "
               f"vega {tot['vega']:,.0f} USD/vol pt")
-        check(abs(tot["deltaspot"]) < 2.0, "book still close to delta-neutral (hedged at start)")
+        check(abs(tot["deltaspot"]) < 2.0, "BTC book still close to delta-neutral (hedged at start)")
+        booked = q("rdb", "exec distinct asset from pos")
+        booked = sorted(b.decode() if isinstance(b, bytes) else str(b) for b in booked)
+        print(f"  INFO  coins with a book: {', '.join(booked)}")
+        check(len(booked) >= 7, f"a sample book for every coin ({len(booked)} coins)")
     check(c1.get("scen", 0) >= 77, f"scenario grid published ({c1.get('scen', 0)} rows, 77 per grid)")
     if c1.get("scen", 0):
-        z = q("rdb", "exec last abs pnl from scen where dspot=0, dvol=0")
+        z = q("rdb", "exec max abs pnl from scen where dspot=0, dvol=0")
         check(z < 1e-6, "scenario grid: zero move gives zero P&L")
     check(c1.get("pnl", 0) >= 1, f"P&L explain published ({c1.get('pnl', 0)} intervals)")
     if c1.get("pnl", 0):
@@ -160,9 +170,25 @@ def main() -> int:
         print(f"  INFO  P&L explain: sum |actual| {e['actual']:,.2f} USD, sum |unexplained| {e['unexpl']:,.2f} USD")
         check(e["unexpl"] <= 0.05 * e["actual"] + 1.0, "P&L explain leaves under 5% unexplained")
     if c1.get("vares", 0):
-        v = q("rdb", "exec last var99, last kupiec from vares where method=`fhs")
-        print(f"  INFO  VaR 99% (FHS) {v['var99']:,.0f} USD, backtest Kupiec p = {v['kupiec']:.2f}")
-    check(c1.get("vares", 0) == 2, f"VaR / ES published for HS and FHS ({c1.get('vares', 0)} rows)")
+        v = q("rdb", "exec last var99, last kupiec from vares where method=`fhs, asset=`BTC")
+        print(f"  INFO  BTC VaR 99% (FHS) {v['var99']:,.0f} USD, backtest Kupiec p = {v['kupiec']:.2f}")
+    check(c1.get("vares", 0) >= 2 * 7, f"each coin's own VaR / ES published, HS and FHS ({c1.get('vares', 0)} rows)")
+
+    print("\n[2c2] portfolio: joint VaR / ES across every coin's book")
+    check(c1.get("port", 0) > 0, f"portfolio rows published ({c1.get('port', 0)})")
+    if c1.get("port", 0):
+        g = lambda scope, metric, asset="ALL": q(          # noqa: E731
+            "rdb", f"exec last val from port where sym=`{scope}, method=`fhs, metric=`{metric}, asset=`{asset}")
+        es, s_es, div = g("joint", "es975"), g("joint", "sum_es975"), g("joint", "div_es975")
+        contrib = q("rdb", "exec sum val from port where sym=`joint, method=`fhs, metric=`contrib_es975, "
+                           "time=max time")
+        print(f"  INFO  joint ES 97.5% (FHS) {es:,.0f} USD; summed standalone {s_es:,.0f}; "
+              f"diversification {div:,.0f}; VaR 99% {g('joint', 'var99'):,.0f}")
+        check(abs(contrib - es) <= 1e-6 * es, "ES contributions add up to the joint ES")
+        check(div >= -1e-6 * es, "ES diversification benefit is not negative (ES is subadditive)")
+        bt = g("joint", "kupiec")
+        print(f"  INFO  joint VaR backtest: {g('joint', 'btexc'):.0f} exceptions in {g('joint', 'btdays'):.0f} "
+              f"days, Kupiec p = {bt:.2f}; stress ES {g('stress', 'es975'):,.0f}")
 
     print("\n[2d] dashboard: every view's q query on the live gateway, and the web page")
     from dashboard.sources import Q, GatewaySource

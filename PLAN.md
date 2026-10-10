@@ -102,9 +102,9 @@ These are the pieces that separate a demo from a system a desk would actually ru
 3. **C++ pricing** — Black-76, IV solver, full Greek set, tests ✅ (calc engine wiring into the tickerplant comes with Phase 4)
 4. **Vol surface** — live engine, parity forwards, SVI raw + arbitrage-free, evaluation harness ✅
 5. **Risk** — portfolio Greeks, vega buckets, scenario grid, P&L explain, VaR/ES with backtest ✅ (smile-rule verdict, 4 h of live BTC data on 9 Oct 2026: sticky-moneyness, R = 0, won both folds; [results/phase5_smile_rules.md](results/phase5_smile_rules.md))
-6. **Dashboard** — Dash + Plotly, Market / Risk / System pages over the gateway; public demo on Streamlit Community Cloud (a replay of the 4-hour session) ✅
+6. **Dashboard** — Dash + Plotly, Market / Risk / Portfolio / System pages over the gateway; public demo on Streamlit Community Cloud (a replay of the 4-hour session) ✅
 7. **Polish** — CI (C++, Python and demo jobs on every push), benchmarks (`results/benchmarks.md`), design document (`docs/DESIGN.md`) ✅; demo video still to record
-8. **Multi-asset** — see below. 8a (every Deribit coin: ETH + 7 USDC coins, inverse and linear conventions) ✅; India on hold (no broker API account)
+8. **Multi-asset** — see below. 8a (every Deribit coin: ETH + 7 USDC coins, inverse and linear conventions) ✅; 8b (a book per coin and a joint VaR/ES with contributions) ✅; India on hold (no broker API account)
 
 ## Phase 8: multi-asset (after the crypto version is complete)
 
@@ -116,7 +116,7 @@ These are the pieces that separate a demo from a system a desk would actually ru
 
 | Market | Instruments | Data route (non-professional prices, Oct 2026) |
 |---|---|---|
-| Crypto | BTC, ETH and all seven Deribit USDC-settled coins (linear) — **done (Phase 8a)**; cross-asset risk next | Deribit websocket, free |
+| Crypto | BTC, ETH and all seven Deribit USDC-settled coins (linear) — **done (Phase 8a)**; per-coin books and joint VaR — **done (8b)** | Deribit websocket, free |
 | US | SPX/SPY index options, single stocks; CME futures options (FX incl. GBP, rates, crude) | Interactive Brokers API: OPRA $1.50/mo, CME $1.25/mo, each waived above $20/mo commissions. ThetaData Standard ($80/mo) later for full SPX chains |
 | India | NSE Nifty and Bank Nifty options (European, cash-settled, weekly expiries) | Upstox market-data websocket (free) or Zerodha Kite Connect (Rs 500/mo) |
 | UK | FTSE 100 index options (ICE Futures Europe); GBP via CME FX options | Live FTSE is expensive (ICE Financials ~$122/mo via IB): start with ICE end-of-day settlements (to confirm) + CME GBP options live |

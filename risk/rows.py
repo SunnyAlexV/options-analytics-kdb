@@ -43,3 +43,36 @@ def vares_rows(res: pd.DataFrame, bt: dict, book: str, asset: str, R: float) -> 
                     "var99": float(r["var99"]), "es975": float(r["es975"]), "es99": float(r["es99"]),
                     "btdays": int(b["days"]), "btexc": int(b["exceptions"]), "kupiec": float(b["kupiec_p"])})
     return _ordered("vares", out)
+
+
+def port_rows(rep: dict, bt: dict) -> list[dict]:
+    """The portfolio report (risk/portfolio.compute) and its backtest as long rows."""
+    R = float(rep["R"])
+    out = []
+
+    def add(scope, method, metric, val, asset="ALL", asset2=""):
+        out.append({"sym": scope, "asset": asset, "asset2": asset2, "method": method,
+                    "metric": metric, "R": R, "val": float(val)})
+
+    for method, res in rep["methods"].items():
+        for scope, s in res.items():
+            for k in ("var99", "es975", "es99"):
+                add(scope, method, k, s["joint"][k])
+            add(scope, method, "n", s["n"])
+            for k in ("sum_var99", "sum_es975", "div_var99", "div_es975"):
+                add(scope, method, k, s[k])
+            for a, x in s["alone"].items():
+                add(scope, method, "alone_var99", x["var99"], a)
+                add(scope, method, "alone_es975", x["es975"], a)
+                add(scope, method, "contrib_es975", s["contrib_es975"][a], a)
+        if method in bt:
+            b = bt[method]
+            add("joint", method, "btdays", b["days"])
+            add("joint", method, "btexc", b["exceptions"])
+            add("joint", method, "kupiec", b["kupiec_p"])
+    if "corr" in rep:
+        c = rep["corr"]
+        for a in c.index:
+            for b in c.columns:
+                add("corr", "", "corr", c.loc[a, b], a, b)
+    return _ordered("port", out)

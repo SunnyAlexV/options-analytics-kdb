@@ -230,7 +230,25 @@ def risk_rows():
             "risk": R.risk_rows(aggregate(position_greeks(book, m0, R=0.0)), "BTC"),
             "scen": R.scen_rows(scenario_grid(book, m0, R=0.0), "sample", "BTC"),
             "pnl": R.pnl_q_rows(pnl_rows(pnl_explain(book, m0, m1, R=0.0)), "BTC"),
-            "vares": R.vares_rows(res, bt, "sample", "BTC", 0.0)}
+            "vares": R.vares_rows(res, bt, "sample", "BTC", 0.0),
+            "port": port_sample(book, m0, hist)}
+
+
+def port_sample(book, m0, hist):
+    """port rows: the BTC book and a second copy relabelled as another coin."""
+    from risk import portfolio as PF
+    from risk.rows import port_rows
+    m1 = Market_relabel(m0, "BTC", "ETH")
+    b1 = [dict(r, sym=r["sym"].replace("BTC", "ETH")) for r in book]
+    rep = PF.compute({"BTC": book, "ETH": b1}, {"BTC": m0, "ETH": m1}, {"BTC": hist, "ETH": hist.copy()},
+                     R=0.0, window=365, proxied=("ETH",))
+    return port_rows(rep, PF.backtest({"BTC": book, "ETH": b1}, {"BTC": m0, "ETH": m1},
+                                      {"BTC": hist, "ETH": hist.copy()}, 0.0, rep["main"], test_days=10))
+
+
+def Market_relabel(m, a, b):
+    import dataclasses
+    return dataclasses.replace(m, labels=[x.replace(a, b) for x in m.labels])
 
 
 def test_every_table_converts_to_correctly_typed_q_columns():

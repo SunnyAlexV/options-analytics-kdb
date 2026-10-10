@@ -24,7 +24,7 @@ from feed.schema import FEED_SCHEMAS, columns
 
 MARKET = ("quote", "trade", "spot", "snap", "ref", "dq", "gap")
 ENGINE = ("iv", "fwd", "surface")
-RISK = ("pos", "risk", "scen", "pnl", "vares")
+RISK = ("pos", "risk", "scen", "pnl", "vares", "port")
 TABLES = MARKET + ENGINE + RISK
 HEAVY = ("quote", "iv", "snap", "fwd", "surface")   # downsampled: last row per sym per bucket
 NS = 1_000_000_000
@@ -121,37 +121,52 @@ def from_recording(folder, bucket_s: float = 30, risk_every_s: float = 30, R: fl
     log(f"market data: {n_quotes:,} quotes, {len(raw['trade'])} trades over {span:.0f} minutes")
 
     surf = [dict(r, now=n) for r, n in zip(eng_rows["surface"], eng_t["surface"])]
-    if hist is None:
+    assets = sorted({r.get("asset") or "BTC" for r in surf})
+    if hist is None or isinstance(hist, pd.DataFrame):
         try:
-            from risk.history import fetch_history
-            hist = fetch_history("BTC", cache=history_cache)
+            from risk.history import fetch_histories
+            hist = fetch_histories(assets, cache=history_cache)
         except Exception as e:
-            log(f"history unavailable ({type(e).__name__}); no VaR in this bundle")
+            log(f"history unavailable ({type(e).__name__}); "
+                + ("BTC-only VaR from the given history" if hist is not None else "no VaR in this bundle"))
+            hist = {"BTC": hist} if isinstance(hist, pd.DataFrame) else None
     out.update(_risk_offline(surf, raw["spot"], raw["ref"], risk_every_s, R, hist, log))
     for t in HEAVY:
         out[t] = downsample(out[t], bucket_s)
     return out
 
 
-def _risk_offline(surf, spot_rows, ref_rows, every_s, R, hist, log, asset="BTC"):
-    """The risk process's outputs on a simulated clock (same functions as risk/__main__.py).
-    Like the live risk process, it books one asset (BTC); a multi-coin recording's other
-    coins are filtered out here."""
+def _risk_offline(surf, spot_rows, ref_rows, every_s, R, hist, log, var_every_s=900.0):
+    """The risk process's outputs on a simulated clock, with the same functions and the same
+    rules as risk/__main__.py: a sample book per coin (sized to the BTC book's USD notional),
+    Greeks, scenarios, P&L explain, each coin's own VaR and the portfolio VaR across coins.
+    ``hist``: coin -> daily history (risk.history.fetch_histories), or None for no VaR."""
+    from risk import portfolio as PF
     from risk import rows as RR
     from risk import var as varmod
     from risk.book import sample_book
     from risk.core import aggregate, pnl_explain, pnl_rows, position_greeks, scenario_grid
+    from risk.history import var_source, vol_source
     from risk.market import Market
 
-    mine = lambda r: (r.get("asset") or "BTC") == asset            # noqa: E731
-    surf = [r for r in surf if mine(r)]
-    spot_rows = [r for r in spot_rows if mine(r)]
-    listed = {}
+    asset_of = lambda r: r.get("asset") or "BTC"                    # noqa: E731
+    assets = sorted({asset_of(r) for r in surf})
+    listed, listed_exp, spots = {a: {} for a in assets}, {a: {} for a in assets}, {}
     for r in ref_rows:
-        if r.get("kind") == "option" and mine(r):
-            listed.setdefault("-".join(r["sym"].split("-")[:2]), []).append(r["strike"])
-    spot_t = np.array([r["recv"] for r in spot_rows], dtype=np.int64)
-    spot_p = np.array([r["price"] for r in spot_rows], dtype=float)
+        a = asset_of(r)
+        if r.get("kind") == "option" and a in listed:
+            lab = "-".join(r["sym"].split("-")[:2])
+            listed[a].setdefault(lab, []).append(r["strike"])
+            listed_exp[a][lab] = int(r["expiry"])
+    for a in assets:
+        sr = [r for r in spot_rows if asset_of(r) == a]
+        spots[a] = (np.array([r["recv"] for r in sr], dtype=np.int64), np.array([r["price"] for r in sr], dtype=float))
+
+    def spot_at(a, t):
+        st, sp = spots[a]
+        k = np.searchsorted(st, t, side="right") - 1
+        return float(sp[k]) if k >= 0 else None
+
     surf = sorted(surf, key=lambda r: r["now"])
     rows = {t: [] for t in RISK}
     times = {t: [] for t in RISK}
@@ -160,41 +175,62 @@ def _risk_offline(surf, spot_rows, ref_rows, every_s, R, hist, log, asset="BTC")
         rows[t] += rs
         times[t] += [now] * len(rs)
 
-    latest, i, book, prev = {}, 0, None, None
-    first = surf[0]["now"] if surf else 0
-    t, end = first + int(every_s * NS), surf[-1]["now"] if surf else 0
+    latest = {a: {} for a in assets}
+    books, prev, first = {}, {}, {}
+    i = 0
+    start = surf[0]["now"] if surf else 0
+    t, end = start + int(every_s * NS), surf[-1]["now"] if surf else 0
     last_scen = last_var = -1e30
+    n_var = 0
     while t <= end:
         while i < len(surf) and surf[i]["now"] <= t:
-            latest[surf[i]["sym"]] = surf[i]
+            latest[asset_of(surf[i])][surf[i]["sym"]] = surf[i]
             i += 1
-        k = np.searchsorted(spot_t, t, side="right") - 1
-        m = Market.from_surface(latest.values(), asof=t, spot=float(spot_p[k]) if k >= 0 else None)
-        if not m.labels:
-            t += int(every_s * NS)
-            continue
-        if book is None:
-            if (m.T() * 365).max() < 80 and t - first < 60 * NS:
-                t += int(every_s * NS)
+        mk = {}
+        for a in assets:
+            m = Market.from_surface(latest[a].values(), asof=t, spot=spot_at(a, t))
+            if not m.labels:
                 continue
-            book = sample_book(m, listed, hedge_rule_R=R)
-            add("pos", RR.pos_rows(book, asset), t)
-            prev = m
-        add("risk", RR.risk_rows(aggregate(position_greeks(book, m, R=R)), asset), t)
-        if t - last_scen >= 60 * NS:
-            add("scen", RR.scen_rows(scenario_grid(book, m, R=R), "sample", asset), t)
-            ex = pnl_explain(book, prev, m, R=R)
-            if not ex.empty and t > prev.asof:
-                add("pnl", RR.pnl_q_rows(pnl_rows(ex), asset), t)
-            prev, last_scen = m, t
-        if hist is not None and t - last_var >= 900 * NS:
-            res = varmod.compute(book, m, hist, R=R)
-            bt = varmod.backtest(book, m, hist, R=R)
-            add("vares", RR.vares_rows(res, bt, "sample", asset, R), t)
+            if a not in books:
+                first.setdefault(a, t)
+                days = [(e - t) / (86400 * NS) for e in listed_exp[a].values()]
+                want = min(80.0, 0.95 * max([d for d in days if d >= 2] or [80.0 / 0.95]))
+                if (m.T() * 365).max() < want and t - first[a] < 60 * NS:
+                    continue
+                ref_spot = next((spot_at(b, t) for b in ("BTC", "BTC_USDC") if b in spots and spot_at(b, t)),
+                                float("nan"))
+                s_a = spot_at(a, t) or float(m.F[0])
+                books[a] = sample_book(m, listed[a], hedge_rule_R=R, scale=PF.scale_for(a, s_a, ref_spot))
+                add("pos", RR.pos_rows(books[a], a), t)
+                prev[a] = m
+            mk[a] = m
+        for a, m in mk.items():
+            add("risk", RR.risk_rows(aggregate(position_greeks(books[a], m, R=R)), a), t)
+        if mk and t - last_scen >= 60 * NS:
+            for a, m in mk.items():
+                add("scen", RR.scen_rows(scenario_grid(books[a], m, R=R), "sample", a), t)
+                ex = pnl_explain(books[a], prev[a], m, R=R)
+                if not ex.empty and t > prev[a].asof:
+                    add("pnl", RR.pnl_q_rows(pnl_rows(ex), a), t)
+                prev[a] = m
+            last_scen = t
+        if hist and mk and t - last_var >= var_every_s * NS:
+            vm = {a: m for a, m in mk.items() if a in hist}
+            for a, m in vm.items():
+                res = varmod.compute(books[a], m, hist[a], R=R, source=var_source(a))
+                bt = (varmod.backtest(books[a], m, hist[a], R=R) if len(hist[a]) - 1 > 365 else
+                      {k: {"exceptions": 0, "days": 0, "kupiec_p": float("nan")} for k in ("hs", "fhs")})
+                add("vares", RR.vares_rows(res, bt, "sample", a, R), t)
+            if vm:
+                rep = PF.compute({a: books[a] for a in vm}, vm, hist, R=R,
+                                 proxied=[a for a in vm if vol_source(a)[1]])
+                pbt = PF.backtest({a: books[a] for a in vm}, vm, hist, R, rep["main"]) if rep["main"] else {}
+                add("port", RR.port_rows(rep, pbt), t)
+                n_var += 1
             last_var = t
         t += int(every_s * NS)
-    log(f"risk: {len(rows['risk']):,} risk rows, {len(rows['pnl'])} P&L intervals, "
-        f"{len(rows['vares']) // 2} VaR runs")
+    log(f"risk: books for {len(books)} coins, {len(rows['risk']):,} risk rows, {len(rows['pnl'])} P&L intervals, "
+        f"{n_var} VaR runs")
     return {tb: _frame(tb, rows[tb], times[tb]) for tb in RISK}
 
 

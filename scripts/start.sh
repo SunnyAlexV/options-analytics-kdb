@@ -59,7 +59,7 @@ for p in "${parts[@]}"; do
     engine) for g in $FEED_GROUPS; do        # one surface engine process per group (one engine per coin inside)
               launch "engine_$g" "$ROOT" - "$PY" -u -m engine --mode "$ENGINE_MODE" --tp-port "$TP_PORT" \
                      --rdb-port "$RDB_PORT" --currency "$g"; done ;;
-    risk) launch risk "$ROOT" -             "$PY" -u -m risk --tp-port "$TP_PORT" --rdb-port "$RDB_PORT" --currency "$CURRENCY" \
+    risk) launch risk "$ROOT" -             "$PY" -u -m risk --tp-port "$TP_PORT" --rdb-port "$RDB_PORT" --assets $RISK_ASSETS \
                 --R "$RISK_R" --pnl-every "$RISK_PNL_EVERY" --data "$DATA" ${RISK_BOOK:+--book "$RISK_BOOK"} ;;
     dash) launch dash "$ROOT" "$DASH_PORT"  "$PY" -u -m dashboard --gw "$GW_PORT" --port "$DASH_PORT" \
                 --history "$DATA/history/btc_daily.csv" ;;

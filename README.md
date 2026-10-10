@@ -92,6 +92,8 @@ A second real-time process takes the fitted smiles and, for a book of positions,
 
 **Verdict on 4 hours of live BTC data (9 Oct 2026): sticky-moneyness (R = 0)** won the pre-registered test on both folds. The margin over sticky-strike was small (under 1% of hedged-P&L RMSE), and a freely estimated R overfit badly (|R̂| in the tens, with standard errors as large), so the system runs with R = 0. Full tables: [results/phase5_smile_rules.md](results/phase5_smile_rules.md).
 
+**Every coin, and the portfolio (Phase 8b).** Each coin holds the same sample book at the same USD size. One VaR runs across all of them: every historical day moves each coin by its own move that day, so correlation comes from the data, and each coin's contribution to the expected shortfall is reported (the contributions add up to the total). On the recorded session, diversification across eight coins is only about 8% of the summed ES, because crypto moves together. Details: [results/phase8b_portfolio.md](results/phase8b_portfolio.md), [lessons/09](lessons/09-portfolio-var.md).
+
 Details are in [lessons/06](lessons/06-risk.md).
 
 ## Dashboard (Phase 6)
@@ -114,7 +116,11 @@ A dark trading-desk dashboard (Dash + Plotly), refreshed every 2 seconds through
   - vega buckets;
   - Greeks and P&L through the day;
   - positions with live Greeks;
-  - VaR/ES with the backtest.
+  - VaR/ES with the backtest;
+- **Portfolio:**
+  - the joint VaR/ES across every coin, the diversification benefit and a stress line;
+  - each coin's contribution to the expected shortfall;
+  - the correlation of daily moves and the joint backtest.
 - **System:**
   - throughput;
   - latency at each hop;

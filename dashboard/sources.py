@@ -27,13 +27,15 @@ Q = {
     "surf1m": ("0!select last asset, last atmvol, last rr25, last bf25, last F, last T "
                "by sym, time:0D00:01 xbar time from surface"),
     "trades": "-500#select from trade",
-    "risk_last": "select from risk where time=max time",
+    # every coin's book is published separately, so "latest" is per coin (fby asset)
+    "risk_last": "select from risk where time=(max;time) fby asset",
     "risk1m": ("0!select last mtm, last deltaspot, last cashdelta, last gamma, last vega, last theta, "
-               "last vanna, last volga by time:0D00:01 xbar time from risk where kind=`total"),
-    "scen_last": "select from scen where time=max time",
+               "last vanna, last volga by asset, time:0D00:01 xbar time from risk where kind=`total"),
+    "scen_last": "select from scen where time=(max;time) fby asset",
     "pnl": "select from pnl",
     "vares": "select from vares",
-    "pos": "select from pos where time=max time",
+    "pos": "select from pos where time=(max;time) fby asset",
+    "port_last": "select from port where time=max time",
     "dq": "select from dq",
     "gap": "select from gap",
     "lat1m": ("0!select ms:1e-6*med `long$time-`timespan$recv by time:0D00:01 xbar time from quote "
@@ -75,19 +77,34 @@ def _at_max_time(df):
     return df[df["time"] == df["time"].max()].reset_index(drop=True) if len(df) else df
 
 
+def _at_max_time_by_asset(df):
+    """Each coin's latest snapshot (q: where time=(max;time) fby asset)."""
+    if not len(df):
+        return df
+    return df[df["time"] == df.groupby("asset")["time"].transform("max")].reset_index(drop=True)
+
+
+def _empty(table):
+    """An empty frame with a table's columns (a bundle made before the table existed)."""
+    from feed.schema import columns
+    return pd.DataFrame(columns=["time"] + columns(table))
+
+
 # name -> pandas function(tables up to now) with the same meaning as Q[name]
 P = {
     **{f"latest_{t}": (lambda t: lambda T: _last_by_sym(T[t]))(t) for t in LATEST},
     "spot1m": lambda T: _bars(T["spot"], ["price"], by="asset"),
     "surf1m": lambda T: _bars(T["surface"], ["asset", "atmvol", "rr25", "bf25", "F", "T"], by="sym"),
     "trades": lambda T: T["trade"].tail(500).reset_index(drop=True),
-    "risk_last": lambda T: _at_max_time(T["risk"]),
+    "risk_last": lambda T: _at_max_time_by_asset(T["risk"]),
     "risk1m": lambda T: _bars(T["risk"][T["risk"]["kind"] == "total"],
-                              ["mtm", "deltaspot", "cashdelta", "gamma", "vega", "theta", "vanna", "volga"]),
-    "scen_last": lambda T: _at_max_time(T["scen"]),
+                              ["mtm", "deltaspot", "cashdelta", "gamma", "vega", "theta", "vanna", "volga"],
+                              by="asset"),
+    "scen_last": lambda T: _at_max_time_by_asset(T["scen"]),
     "pnl": lambda T: T["pnl"],
     "vares": lambda T: T["vares"],
-    "pos": lambda T: _at_max_time(T["pos"]),
+    "pos": lambda T: _at_max_time_by_asset(T["pos"]),
+    "port_last": lambda T: _at_max_time(T["port"]) if "port" in T else _empty("port"),
     "dq": lambda T: T["dq"],
     "gap": lambda T: T["gap"],
     # a bundle stamps rows with the feed's receive time, so feed -> tickerplant delay is not in it

@@ -41,6 +41,7 @@ MARKET_VIEWS = ["latest_surface", "latest_iv", "latest_ref", "latest_snap", "lat
                 "spot1m", "surf1m", "trades"]
 RISK_VIEWS = ["risk_last", "risk1m", "scen_last", "pnl", "vares", "pos", "latest_iv"]
 SYSTEM_VIEWS = ["dq", "gap", "lat1m", "counts", "latest_surface"]
+PORTFOLIO_VIEWS = ["port_last"]
 REPO = "https://github.com/SunnyAlexV/options-analytics-kdb"
 
 st.set_page_config(page_title="Crypto options desk", page_icon="📈", layout="wide")
@@ -194,7 +195,8 @@ def market_page(now, asset, key):
 def risk_page(now, asset, key):
     v = for_asset(source().views(RISK_VIEWS, now), asset)
     if v["risk_last"].empty:
-        st.info(f"No risk book for {asset} in this recording: the sample book is held in BTC.")
+        st.info(f"No risk book for {asset} at this moment of the recording (books are built once a coin's "
+                "curve is fitted; the 4-hour session predates per-coin books and holds BTC only).")
         return
     t = A.risk_tiles(v)
     f = TB.fmt
@@ -246,6 +248,30 @@ def risk_page(now, asset, key):
               "(below 0.05 = the method is rejected).", key=f"r-var-{key}")
 
 
+def portfolio_page(now, key):
+    pf = A.portfolio(source().views(PORTFOLIO_VIEWS, now))
+    if not pf:
+        st.info("No portfolio VaR at this moment of the recording: it runs every 15 minutes once the books "
+                "are built (the 4-hour BTC session predates it; pick the all-coin session).")
+        return
+    tiles(TB.portfolio_tiles(pf))
+    c1, c2 = st.columns(2)
+    with c1:
+        chart(FG.es_contributions(pf["contrib"]), "p-contrib")
+    with c2:
+        chart(FG.correlation(pf["corr"]), "p-corr")
+    c1, c2 = st.columns(2)
+    with c1:
+        table(TB.text_frame(pf["variants"], TB.PORT_VARIANT_FMT), "Portfolio VaR and ES (USD, 1 day, FHS)",
+              "Each historical day moves every coin by its own actual move that day (price, and vol: own DVOL "
+              "for BTC and ETH, BTC's DVOL for coins without one), so correlation is in the scenarios. "
+              "Diversification = sum of each coin's ES alone − the portfolio's ES.", key=f"p-var-{key}")
+    with c2:
+        table(TB.port_coin_frame(pf["contrib"]), "By coin",
+              "contribution = the coin's average loss on the portfolio's worst 2.5% of days; the contributions "
+              "add up to the portfolio's ES 97.5%", key=f"p-coins-{key}")
+
+
 def system_page(now, key):
     v = source().views(SYSTEM_VIEWS, now)
     fh = A.feed_health(v)
@@ -277,7 +303,7 @@ def system_page(now, key):
 
 # --------------------------------------------------------------------------- layout
 st.markdown(CSS, unsafe_allow_html=True)
-head = st.columns([3, 2, 2, 3, 2], vertical_alignment="bottom")
+head = st.columns([3, 2, 2, 4, 2], vertical_alignment="bottom")
 with head[1]:
     session = st.selectbox("Session", list(SESSIONS), key="session", label_visibility="collapsed",
                            help="Recorded live from Deribit on 9 Oct 2026")
@@ -289,7 +315,7 @@ with head[0]:
     st.markdown(f'<span class="meta">Replay of a live session recorded from Deribit by '
                 f'<a href="{REPO}">this kdb+ / C++ / Python system</a></span>', unsafe_allow_html=True)
 with head[3]:
-    page = st.segmented_control("Page", ["Market", "Risk", "System"], default="Market", required=True,
+    page = st.segmented_control("Page", ["Market", "Risk", "Portfolio", "System"], default="Market", required=True,
                                 key="page", label_visibility="collapsed")
 with head[4]:
     live = st.toggle(f"Live replay ({speed:g}×)", value=True, key="live",
@@ -317,6 +343,8 @@ def render(now, key):
         market_page(now, asset, key)
     elif page == "Risk":
         risk_page(now, asset, key)
+    elif page == "Portfolio":
+        portfolio_page(now, key)
     else:
         system_page(now, key)
 

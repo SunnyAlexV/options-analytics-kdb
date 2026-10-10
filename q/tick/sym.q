@@ -16,3 +16,4 @@ risk:([] time:`timespan$(); sym:`symbol$(); asset:`symbol$(); kind:`symbol$(); b
 scen:([] time:`timespan$(); sym:`symbol$(); asset:`symbol$(); R:`float$(); dspot:`float$(); dvol:`float$(); pnl:`float$())
 pnl:([] time:`timespan$(); sym:`symbol$(); asset:`symbol$(); start:`timestamp$(); end:`timestamp$(); R:`float$(); actual:`float$(); delta:`float$(); gamma:`float$(); vega:`float$(); theta:`float$(); vanna:`float$(); volga:`float$(); unexpl:`float$(); smile:`float$(); surf:`float$())
 vares:([] time:`timespan$(); sym:`symbol$(); asset:`symbol$(); method:`symbol$(); R:`float$(); window:`long$(); src:`symbol$(); wstart:`timestamp$(); wend:`timestamp$(); var99:`float$(); es975:`float$(); es99:`float$(); btdays:`long$(); btexc:`long$(); kupiec:`float$())
+port:([] time:`timespan$(); sym:`symbol$(); asset:`symbol$(); asset2:`symbol$(); method:`symbol$(); metric:`symbol$(); R:`float$(); val:`float$())

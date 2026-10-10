@@ -48,6 +48,19 @@ def test_all_coin_session_lists_every_asset_and_each_renders():
         at.segmented_control(key="page").set_value("Risk").run()      # no book for alts: a note, no error
         assert errors(at) == [], a
         at.segmented_control(key="page").set_value("Market").run()
+    at.toggle(key="live").set_value(False).run()                       # pause late in the session
+    import pandas as pd
+    last = pd.read_parquet(BUNDLE / "surface.parquet", columns=["time"])["time"].max().floor("1min")
+    at.select_slider(key="moment").set_value(last).run()                # the last minute: both VaR runs done
+    at.segmented_control(key="page").set_value("Portfolio").run()
+    assert errors(at) == []
+    assert len(at.get("plotly_chart")) >= 2                            # contributions, correlations
+    assert any("Portfolio ES" in m.value for m in at.markdown)
+    at.selectbox(key="asset").set_value("SOL_USDC").run()
+    at.segmented_control(key="page").set_value("Risk").run()          # SOL has its own book now
+    assert errors(at) == [] and len(at.get("plotly_chart")) >= 9
+    at.toggle(key="live").set_value(True).run()
+    at.segmented_control(key="page").set_value("Market").run()
     at.selectbox(key="session").set_value("BTC · 4 hours").run()      # the long BTC session
     assert errors(at) == []
     assert len(at.get("plotly_chart")) >= 10

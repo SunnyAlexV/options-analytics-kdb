@@ -6,7 +6,8 @@
 
 From kdb+, the bundle holds exactly what the live system published. From a feed recording,
 the surface engine and risk calculations are re-run offline on a simulated clock.
-The daily index/DVOL history is saved alongside (history.csv), so the demo needs no network.
+The daily index/DVOL history is saved alongside (history.csv for BTC's variance-risk-premium
+chart; history_all.csv, every coin's, for the VaR of a recording), so the demo needs no network.
 """
 import argparse
 import sys
@@ -32,7 +33,8 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     hist = fetch_history("BTC", cache=out / "history.csv", refresh=True)
     if a.recording:
-        T = bundle.from_recording(a.recording, bucket_s=a.bucket, R=a.R, hist=hist)
+        # every coin's daily index + vol history, saved in the bundle (history_all.csv) for the VaR
+        T = bundle.from_recording(a.recording, bucket_s=a.bucket, R=a.R, history_cache=out / "history_all.csv")
     else:
         T = bundle.from_gateway(a.gw, a.date, bucket_s=a.bucket)
     bundle.save(T, out)

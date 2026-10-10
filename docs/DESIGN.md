@@ -17,7 +17,7 @@ For every option Deribit lists (BTC and ETH settled in the coin, and seven coins
 - prices every quote: bid, mid and ask implied vols on each expiry's forward;
 - estimates each expiry's **forward and discount factor from put-call parity** across the whole chain;
 - fits **two SVI smiles per expiry** (raw, and arbitrage-free), with desk metrics: ATM vol, 25-delta risk reversal and butterfly, term structure, and the implied distribution;
-- runs **portfolio risk** on a sample BTC book: Greeks in desk units, vega buckets, a spot × vol scenario grid, P&L explain, and VaR/ES with a backtest;
+- runs **portfolio risk** on a sample book per coin: Greeks in desk units, vega buckets, a spot × vol scenario grid, P&L explain, each coin's VaR/ES with a backtest, and a **joint VaR/ES across all coins** with each coin's contribution;
 - shows all of it on a dark trading-desk dashboard, live from kdb+ or replayed from a recording.
 
 ## 2. Architecture
@@ -31,7 +31,7 @@ Deribit ──► Feed handlers (Python, one per settlement group: BTC · ETH ·
                ▼                    ▼                         ▼
      Real-time DB (q)     Surface engines (Python + C++)    Risk (Python + C++)
      today, in memory     IV · parity forward · SVI          Greeks · scenarios · P&L · VaR
-               │          publish iv/fwd/surface back ──►    publish pos/risk/scen/pnl/vares back ──► (tickerplant)
+               │          publish iv/fwd/surface back ──►    publish pos/risk/scen/pnl/vares/port ──► (tickerplant)
                │ end of day
                ▼
      Historical DB (q), one partition per date
@@ -120,7 +120,17 @@ shared. **Evidence:** Deribit lists BTC and ETH in both conventions as separate 
 they agree to a median of −0.02 vol points in ATM vol over 14 expiries, and the two BTC forwards to 0.8 bp in the
 live system test. A convention error would show up as tens of vol points. ([results/phase8_multi_crypto.md](../results/phase8_multi_crypto.md), [lessons/08](../lessons/08-multi-crypto.md))
 
-### 4.8 Two front ends over one set of analytics (Phase 6)
+### 4.8 One VaR across every coin, with correlation from the data (Phase 8b)
+Each coin holds the same sample book, sized to the BTC book's USD notional per leg. The joint VaR/ES moves
+every coin by **its own actual move on the same historical day**, so correlation (and joint tail behaviour)
+comes from the data rather than an estimated matrix. Each coin's contribution to ES is its average loss on
+the portfolio's worst days (Euler allocation; the contributions add up exactly). Deribit has no vol index
+for most alts, so BTC's DVOL stands in, and a stress line (×1.5 on those vol moves) shows how much that
+assumption matters: about 25% of ES. **Result:** diversification is only about 8% of the summed ES (FHS):
+crypto moves together (median correlation 0.82), and four of the eight books are the same two coins.
+([results/phase8b_portfolio.md](../results/phase8b_portfolio.md), [lessons/09](../lessons/09-portfolio-var.md))
+
+### 4.9 Two front ends over one set of analytics (Phase 6)
 The live dashboard is Dash over the kdb+ gateway; every panel's data is defined twice, as a q query and as a
 pandas function with the same meaning (`dashboard/sources.py` refuses to load if one is missing). The system
 test runs every q version on the live gateway; the unit tests run the pandas versions. The public demo is a Streamlit app that
@@ -133,7 +143,7 @@ stopped hosting Docker apps on free accounts in July 2026. ([lessons/07](../less
 | Layer | How | Where |
 |---|---|---|
 | C++ | 22 GoogleTest cases: prices vs reference values, every Greek vs bump-and-revalue, IV round trips, SVI constraints, revaluation | `cpp/tests/`, CI |
-| Python | 64 pytest tests: feed parsing on recorded Deribit messages, schema ↔ q types, engine on synthetic chains with a known answer, conventions, risk identities, dashboard views (pandas vs q), multi-asset routing | `tests/`, CI |
+| Python | 73 pytest tests: feed parsing on recorded Deribit messages, schema ↔ q types, engine on synthetic chains with a known answer, conventions, risk identities, portfolio VaR identities (contributions sum to ES, zero diversification for identical books), dashboard views (pandas vs q), multi-asset routing | `tests/`, CI |
 | Demo | Streamlit's headless AppTest: every page, both sessions, several coins | `tests/test_streamlit_app.py`, CI |
 | Whole system | Starts every process, collects 60 s of live Deribit data and runs 54 checks (about 4 minutes in all): schemas, data flow, fits, risk, dashboard queries, crash recovery, end of day | `scripts/system_test.py` (local: needs the kdb+ licence) |
 
@@ -157,10 +167,11 @@ by unit tests alone. That is why the end-to-end system test exists alongside the
 
 ## 7. Limitations and next steps
 
-- **One sample book, BTC only.** Risk runs on a constructed BTC book (seven option legs across four expiries,
-  1 week to 3 months, plus a futures hedge); the other coins have surfaces but
-  no book. Next: per-asset books and a joint VaR on common historical days (using BTC's DVOL as a proxy for coins
-  without their own vol index).
+- **Sample books, and a vol proxy.** Each coin holds the same constructed book (seven option legs across four
+  expiries, 1 week to 3 months, plus a hedge), not a real trading history. For coins without a Deribit vol index
+  the VaR uses BTC's DVOL moves; the stress line shows this moves ES by about 25%. Next: use our own HDB of fitted
+  surfaces as each coin's vol history once it is long enough. HYPE has only 131 days of price history, so it
+  joins only a separately labelled all-coins figure.
 - **The smile-rule verdict is one afternoon.** Four hours of BTC data, a small margin. It should be re-run over
   several days and market regimes before it is trusted.
 - **Wings are extrapolated.** Beyond the quoted strikes the arbitrage-free SVI can depart a long way from Deribit's

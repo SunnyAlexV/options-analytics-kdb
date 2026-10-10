@@ -1,4 +1,4 @@
-"""The Dash app: three pages (Market, Risk, System) over one data source.
+"""The Dash app: four pages (Market, Risk, Portfolio, System) over one data source.
 
 Layout is static: every chart has a fixed id and callbacks only replace its figure, so zoom and
 the 3D camera survive the 2-second refresh (``uirevision``). Each page's callback runs only while
@@ -24,6 +24,7 @@ MARKET_VIEWS = ["latest_surface", "latest_iv", "latest_ref", "latest_snap", "lat
                 "spot1m", "surf1m", "trades"]
 RISK_VIEWS = ["risk_last", "risk1m", "scen_last", "pnl", "vares", "pos", "latest_iv"]
 SYSTEM_VIEWS = ["dq", "gap", "lat1m", "counts", "latest_surface"]
+PORTFOLIO_VIEWS = ["port_last"]
 
 
 _fmt = TB.fmt
@@ -88,6 +89,17 @@ def create_app(source, history=None) -> dash.Dash:
                             "(EWMA 0.94). Backtest: exceptions of VaR 99% over the past year with Kupiec's p-value "
                             "(below 0.05 = the method is rejected).")], className="grid g11"),
     ])
+    portfolio = html.Div([
+        html.Div(id="p-tiles", className="tiles"),
+        html.Div([card(graph("p-contrib")), card(graph("p-corr"))], className="grid g11"),
+        html.Div([card(table("p-variants"), title="Portfolio VaR and ES (USD, 1 day)",
+                       note="Each historical day moves every coin by its own actual move that day (price, and vol: "
+                            "own DVOL for BTC and ETH, BTC's DVOL for coins without one), so correlation is in the "
+                            "scenarios. Diversification = sum of each coin's ES alone − the portfolio's ES."),
+                  card(table("p-coins"), title="By coin",
+                       note="contribution = the coin's average loss on the portfolio's worst 2.5% of days; "
+                            "the contributions add up to the portfolio's ES 97.5%")], className="grid g11"),
+    ])
     system = html.Div([
         html.Div(id="s-tiles", className="tiles"),
         html.Div([card(graph("s-quotes")), card(graph("s-latency"))], className="grid g11"),
@@ -108,6 +120,7 @@ def create_app(source, history=None) -> dash.Dash:
         dcc.Tabs(id="tabs", value="market", children=[
             dcc.Tab(market, label="Market", value="market", className="tab", selected_className="tab--selected"),
             dcc.Tab(risk, label="Risk", value="risk", className="tab", selected_className="tab--selected"),
+            dcc.Tab(portfolio, label="Portfolio", value="portfolio", className="tab", selected_className="tab--selected"),
             dcc.Tab(system, label="System", value="system", className="tab", selected_className="tab--selected"),
         ]),
     ], className="wrap")
@@ -210,6 +223,23 @@ def create_app(source, history=None) -> dash.Dash:
                 *_simple_table(pos, TB.POS_FMT)[::-1],
                 *_var_table(v["vares"])[::-1]]
 
+    # ------------------------------------------------------------ portfolio
+    @app.callback(
+        [Output("p-tiles", "children"), Output("p-contrib", "figure"), Output("p-corr", "figure"),
+         Output("p-variants", "data"), Output("p-variants", "columns"),
+         Output("p-coins", "data"), Output("p-coins", "columns")],
+        [Input("tick", "n_intervals"), Input("tabs", "value")])
+    def portfolio_page(_, tab):
+        if tab != "portfolio":
+            return [dash.no_update] * 7
+        pf = A.portfolio(source.views(PORTFOLIO_VIEWS))
+        if not pf:
+            return [[tile("Portfolio", "–", "no portfolio VaR yet")], FG.es_contributions(None),
+                    FG.correlation(None), [], [], [], []]
+        return [portfolio_tiles(pf), keep(FG.es_contributions(pf["contrib"])), keep(FG.correlation(pf["corr"])),
+                *_simple_table(pf["variants"], TB.PORT_VARIANT_FMT)[::-1],
+                *_records(TB.port_coin_frame(pf["contrib"]))[::-1]]
+
     # ------------------------------------------------------------ system
     @app.callback(
         [Output("s-tiles", "children"), Output("s-quotes", "figure"), Output("s-latency", "figure"),
@@ -240,6 +270,10 @@ def create_app(source, history=None) -> dash.Dash:
                 *_simple_table(gaps, {})[::-1]]
 
     return app
+
+
+def portfolio_tiles(pf: dict) -> list:
+    return [tile(label, value, sub) for label, value, sub in TB.portfolio_tiles(pf)]
 
 
 # ---------------------------------------------------------------- tables

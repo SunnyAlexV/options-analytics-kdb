@@ -323,6 +323,48 @@ def scenario_matrix(views: dict) -> pd.DataFrame:
     return s.pivot_table(index="dvol", columns="dspot", values="pnl").sort_index()
 
 
+# ------------------------------------------------------------------ portfolio page
+def portfolio(views: dict, method: str = "fhs") -> dict:
+    """The latest portfolio report (port table) in shapes for the page: headline numbers, each
+    coin's standalone ES and ES contribution, the variants, the backtest and the correlations."""
+    p = views.get("port_last")
+    if p is None or p.empty:
+        return {}
+    m = p[p["method"] == method]
+
+    def one(scope, metric, asset="ALL"):
+        x = m[(m["sym"] == scope) & (m["metric"] == metric) & (m["asset"] == asset)]["val"]
+        return float(x.iloc[0]) if len(x) else np.nan
+
+    j = m[m["sym"] == "joint"]
+    coins = sorted(set(j.loc[j["metric"] == "contrib_es975", "asset"]))
+    contrib = pd.DataFrame({
+        "asset": coins,
+        "alone_es975": [one("joint", "alone_es975", a) for a in coins],
+        "contrib_es975": [one("joint", "contrib_es975", a) for a in coins],
+        "alone_var99": [one("joint", "alone_var99", a) for a in coins],
+    }).sort_values("contrib_es975", ascending=False).reset_index(drop=True)
+    total = one("joint", "es975")
+    contrib["share"] = contrib["contrib_es975"] / total if total else np.nan
+    variants = pd.DataFrame([
+        {"variant": name, "days": one(scope, "n"), "VaR 99%": one(scope, "var99"),
+         "ES 97.5%": one(scope, "es975"), "ES 99%": one(scope, "es99"),
+         "sum alone ES 97.5%": one(scope, "sum_es975"), "diversification (ES)": one(scope, "div_es975")}
+        for scope, name in (("joint", "main: coins with a full year"), ("stress", "stress: proxied vol moves x1.5"),
+                            ("allcoins", "all coins, on their shared days"))
+        if np.isfinite(one(scope, "es975"))])
+    c = p[p["sym"] == "corr"]
+    corr = c.pivot_table(index="asset", columns="asset2", values="val") if len(c) else pd.DataFrame()
+    shorts = sorted(set(m.loc[(m["sym"] == "allcoins") & (m["metric"] == "alone_es975"), "asset"]) - set(coins))
+    return {"es975": total, "var99": one("joint", "var99"), "es99": one("joint", "es99"),
+            "sum_es975": one("joint", "sum_es975"), "div_es975": one("joint", "div_es975"),
+            "sum_var99": one("joint", "sum_var99"), "div_var99": one("joint", "div_var99"),
+            "n": one("joint", "n"), "stress_es975": one("stress", "es975"), "all_es975": one("allcoins", "es975"),
+            "all_n": one("allcoins", "n"), "btexc": one("joint", "btexc"), "btdays": one("joint", "btdays"),
+            "kupiec": one("joint", "kupiec"), "R": float(p["R"].iloc[0]),
+            "contrib": contrib, "variants": variants, "corr": corr, "short": shorts, "coins": coins}
+
+
 # ------------------------------------------------------------------ system page
 def feed_health(views: dict) -> dict:
     dq = views["dq"]

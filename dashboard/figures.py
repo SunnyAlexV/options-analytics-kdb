@@ -203,9 +203,9 @@ def scenario_heatmap(m: pd.DataFrame, R: float) -> go.Figure:
         text=[[f"{v / 1e3:+,.0f}k" for v in row] for row in z], texttemplate="%{text}",
         textfont=dict(size=10, color=th.INK),
         colorbar=dict(title=dict(text="USD"), thickness=10, tickfont=dict(color=th.MUTED)),
-        hovertemplate="BTC %{x}, vol %{y} pts<br>P&L %{z:,.0f} USD<extra></extra>"))
+        hovertemplate="spot %{x}, vol %{y} pts<br>P&L %{z:,.0f} USD<extra></extra>"))
     return _h(f, 380, title=f"Scenario P&L, full revaluation (smile rule R = {R:g})",
-              xaxis=dict(title="BTC move", type="category"), yaxis=dict(title="vol shift", type="category"),
+              xaxis=dict(title="spot move", type="category"), yaxis=dict(title="vol shift", type="category"),
               margin=dict(l=96))
 
 
@@ -261,3 +261,35 @@ def latency(dq: pd.DataFrame, lat: pd.DataFrame) -> go.Figure:
         f.add_trace(go.Scatter(x=lat["time"], y=lat["ms"], mode="lines", name="feed → tickerplant, median",
                                line=dict(color=th.AQUA, width=2)))
     return _h(f, 260, title="Latency per minute", yaxis_title="ms", yaxis_rangemode="tozero")
+
+
+# ------------------------------------------------------------------ portfolio
+def es_contributions(c: pd.DataFrame) -> go.Figure:
+    """Each coin's ES 97.5% alone next to its contribution to the portfolio's ES."""
+    title = "Expected shortfall 97.5%: each coin alone vs its share of the portfolio's"
+    if c is None or c.empty:
+        return empty(title)
+    f = go.Figure()
+    f.add_trace(go.Bar(name="alone", x=c["asset"], y=c["alone_es975"], marker=dict(color=th.AXIS),
+                       hovertemplate="%{x} alone: %{y:,.0f} USD<extra></extra>"))
+    f.add_trace(go.Bar(name="contribution to the portfolio", x=c["asset"], y=c["contrib_es975"],
+                       marker=dict(color=th.BLUE), customdata=c["share"],
+                       hovertemplate="%{x}: %{y:,.0f} USD (%{customdata:.0%} of the total)<extra></extra>"))
+    f.add_hline(y=0, line=dict(color=th.AXIS, width=1))
+    return _h(f, 360, title=title, barmode="group", bargap=0.25, yaxis_title="USD, 1 day")
+
+
+def correlation(m: pd.DataFrame) -> go.Figure:
+    title = "Correlation of daily moves (the VaR window)"
+    if m is None or m.empty:
+        return empty(title)
+    order = list(m.index)
+    z = m.loc[order, order].to_numpy()
+    f = go.Figure(go.Heatmap(
+        z=z, x=order, y=order, zmin=min(0.0, float(np.nanmin(z))), zmax=1,
+        colorscale=[[0.0, "#0d366b"], [0.5, "#184f95"], [1.0, "#3987e5"]],      # dark enough for white labels xgap=2, ygap=2,
+        text=[[f"{v:.2f}" for v in row] for row in z], texttemplate="%{text}", textfont=dict(size=10, color=th.INK),
+        colorbar=dict(thickness=10, tickfont=dict(color=th.MUTED)),
+        hovertemplate="%{y} vs %{x}: %{z:.2f}<extra></extra>"))
+    return _h(f, 420, title=title, xaxis=dict(type="category"), yaxis=dict(type="category", autorange="reversed"),
+              margin=dict(l=96, b=90))

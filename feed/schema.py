@@ -129,6 +129,17 @@ FEED_SCHEMAS: dict[str, list[tuple[str, str]]] = {
         ("wstart", "p"), ("wend", "p"), ("var99", "f"), ("es975", "f"), ("es99", "f"),
         ("btdays", "j"), ("btexc", "j"), ("kupiec", "f"),
     ],
+    # Portfolio VaR / ES across every coin's book (risk/portfolio.py), one number per row:
+    # sym = scope: joint (the coins with a full window), stress (proxied coins' vol moves x1.5),
+    # allcoins (every coin, on the days they all share), corr (correlation of daily moves).
+    # asset = a coin, or ALL for portfolio totals; asset2 = the other coin of a correlation pair.
+    # metric: var99 es975 es99 n sum_var99 sum_es975 div_var99 div_es975 (asset ALL);
+    # alone_var99 alone_es975 contrib_es975 (per coin); btdays btexc kupiec (joint backtest); corr.
+    # ("val", because value is a q keyword.)
+    "port": [
+        ("sym", "s"), ("asset", "s"), ("asset2", "s"), ("method", "s"), ("metric", "s"),
+        ("R", "f"), ("val", "f"),
+    ],
 }
 
 # Full q schemas, as stored in the tickerplant, real-time and historical DBs.
